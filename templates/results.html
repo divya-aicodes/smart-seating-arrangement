@@ -1,0 +1,571 @@
+{% extends "base.html" %}
+
+{% block title %}Seating Results &amp; Mathematics Report | Examination Seating Planner{% endblock %}
+
+{% block content %}
+<div class="no-print" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+    <div>
+        <a href="{{ url_for('index') }}" class="btn btn-secondary btn-sm">
+            &larr; Back to Configuration
+        </a>
+    </div>
+
+    {% if not error_occurred %}
+    <div style="display: flex; gap: 0.75rem; align-items: center;">
+        {% if seating_run_id %}
+        <a href="{{ url_for('reports.run_pdf', run_id=seating_run_id) }}" class="btn btn-outline btn-sm">Download PDF</a>
+        <a href="{{ url_for('reports.run_excel', run_id=seating_run_id) }}" class="btn btn-outline btn-sm">Download Excel</a>
+        {% endif %}
+        <button type="button" class="btn btn-outline btn-sm" onclick="window.print()">
+            Print or save PDF
+        </button>
+
+        <form action="{{ url_for('export_csv') }}" method="POST" style="margin: 0;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="allocation_json" value='{{ flat_allocation_table | tojson }}'>
+            <button type="submit" class="btn btn-primary btn-sm">
+                &darr; Export Allocation CSV
+            </button>
+        </form>
+    </div>
+    {% endif %}
+</div>
+
+{% if error_occurred %}
+    <div class="card" style="border-color: var(--accent-rose);">
+        <div class="card-header">
+            <div class="card-title text-danger">
+                &excl; {{ error_title }}
+            </div>
+        </div>
+        <p style="color: var(--text-secondary); margin-bottom: 1rem;">{{ error_message }}</p>
+        {% if error_details %}
+        <ul style="margin: 0 0 1rem 1.25rem; color: var(--text-secondary);">
+            {% for detail in error_details %}
+            <li style="margin-bottom: 0.35rem;">{{ detail }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+        <a href="{{ url_for('index') }}" class="btn btn-primary">Return to Setup</a>
+    </div>
+{% else %}
+
+    <!-- Top Summary Banner -->
+    <div class="card no-print result-summary">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+            <div>
+                <h2 style="font-size: 1.4rem; font-weight: 800; margin-bottom: 0.25rem;">
+                    Seating plan complete: {{ students_count }} students assigned
+                </h2>
+                <p style="font-size: 0.85rem; color: var(--text-muted);">
+                    Arranged across {{ rooms_count }} examination room(s) &bull; 
+                    Adjacency rule: <strong>{{ 'Diagonal Included' if diagonal_enabled else 'Orthogonal (Non-Diagonal)' }}</strong> &bull;
+                    Invigilator ratio: 1 per {{ invigilator_ratio }} students
+                    {% if seating_run_id %}&bull; Persisted seating run: <strong>#{{ seating_run_id }}</strong>{% endif %}
+                    {% if seating_run_id %}&bull; <a href="{{ url_for('reports.run_detail', run_id=seating_run_id) }}">Open persisted report</a>{% endif %}
+                </p>
+            </div>
+
+            <!-- View Toggles for Visual Grid -->
+            <div class="view-toggles">
+                <span style="font-size: 0.8rem; color: var(--text-secondary); align-self: center; margin-right: 0.25rem;">
+                    Color Code by:
+                </span>
+                <button type="button" class="btn btn-primary btn-sm view-toggle-btn" data-mode="class">
+                    Class / Section
+                </button>
+                <button type="button" class="btn btn-outline btn-sm view-toggle-btn" data-mode="subject">
+                    Subject / Course
+                </button>
+            </div>
+        </div>
+    </div>
+
+    {% if feasibility_report.hard_violation_guaranteed %}
+    <div class="card no-print" style="border-color: var(--accent-rose); background: rgba(225, 29, 72, 0.1); margin-bottom: 2rem;">
+        <div class="card-header" style="border-bottom: none; margin-bottom: 0; padding-bottom: 0;">
+            <div class="card-title" style="color: var(--accent-rose);">
+                &excl; Infeasible Configuration Detected
+            </div>
+        </div>
+        <div style="padding: 0.5rem 1.25rem 1.25rem 1.25rem; color: var(--text-primary);">
+            <p style="margin-bottom: 0.75rem; font-weight: bold;">The requested seating arrangement is mathematically infeasible for hard constraints.</p>
+            <ul style="margin-left: 1.5rem; margin-bottom: 1rem; color: var(--text-secondary); font-size: 0.9rem;">
+            {% for diag in feasibility_report.diagnostics %}
+                <li style="margin-bottom: 0.25rem;">{{ diag.message }}</li>
+            {% endfor %}
+            </ul>
+            <p style="font-size: 0.9rem; color: var(--text-muted);">No arrangement is published when a hard constraint cannot be satisfied.</p>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- SECTION 1: Visual Seat Maps per Room -->
+    {% for room_id, room in room_allocations.items() %}
+    <div class="room-container">
+        <div class="room-header" style="margin-bottom: 0.75rem;">
+            <div>
+                <h2 class="room-title">{{ room.room_label }} seating plan</h2>
+                <div style="font-size: 0.82rem; color: var(--text-muted); font-family: var(--font-mono);">
+                    Capacity: {{ room.rows }} rows &times; {{ room.cols }} benches &times; {{ room.seats_per_bench }} seats 
+                    ({{ room.rows * room.cols * room.seats_per_bench }} seats total) &bull; 
+                    Assigned: {{ room.student_count }} students 
+                    ({{ room.special_needs_count }} accessibility request(s))
+                </div>
+            </div>
+
+            <div class="invigilator-summary">
+                <span style="font-size: 0.78rem; color: var(--text-secondary); margin-right: 0.5rem;">
+                    Invigilators Assigned:
+                </span>
+                {% for invig in room.invigilators_list %}
+                    <span class="invigilator-badge">{{ invig }}</span>
+                {% endfor %}
+            </div>
+        </div>
+        
+        <div class="room-summary-banner" style="margin-bottom: 1.5rem; padding: 0.75rem; border-radius: 6px; font-size: 0.85rem; border-left: 4px solid {{ 'var(--accent-rose)' if room.class_violations > 0 else 'var(--accent-emerald)' }};">
+            <div style="margin-bottom: 0.25rem;">
+            {% if room.class_violations > 0 %}
+                <span style="color: var(--accent-rose); font-weight: bold;">&#9888; {{ room.class_violations }} hard-constraint (class) violation(s) could not be avoided — see flagged seats.</span>
+            {% else %}
+                <span style="color: var(--accent-emerald); font-weight: bold;">&check; 0 hard-constraint (class) violations.</span>
+            {% endif %}
+            </div>
+            <div>
+            {% if room.subject_violations > 0 %}
+                <span style="color: var(--accent-amber); font-weight: bold;">&#9888; {{ room.subject_violations }} soft-constraint (subject) relaxation(s) applied.</span>
+            {% else %}
+                <span style="color: var(--accent-emerald); font-weight: bold;">&check; 0 soft-constraint (subject) relaxations.</span>
+            {% endif %}
+            </div>
+        </div>
+
+        <div class="chalkboard">
+            FRONT OF ROOM {{ room_id }}
+        </div>
+
+        <div class="grid-rows">
+            {% for row in room.seats_grid %}
+            <div class="grid-row-container">
+                <div class="row-label">Row {{ row.row_num }}</div>
+                <div class="benches-row">
+                    {% for bench in row.benches %}
+                    <div class="bench" data-bench="{{ bench.bench_num }}">
+                        {% for s in bench.seats %}
+                            {% set stu = s.student %}
+                            <div class="seat {{ 'occupied' if stu else ('empty' if s.available else 'unavailable') }} {{ 'accessible-seat' if s.accessible else '' }} {{ 'has-class-conflict' if stu and stu.has_class_conflict else ('has-relaxed-conflict' if stu and stu.has_subject_relaxation else '') }}"
+                                 title="{{ s.label }}{% if stu %} | ID: {{ stu.id }} | Class: {{ stu.class }} | Subj: {{ stu.subject }}{% if stu.has_class_conflict %} (Class Collision){% elif stu.has_subject_relaxation %} (Relaxed Subject Collision){% endif %}{% endif %}">
+                                
+                                <div class="seat-top">
+                                    <span class="seat-num">S{{ s.seat_num }}</span>
+                                    {% if s.accessible %}
+                                        <span class="accessible-icon" title="Designated Accessible Seat">&#9855;</span>
+                                    {% endif %}
+                                </div>
+
+                                {% if stu %}
+                                    <div class="student-id">{{ stu.id }}</div>
+                                    
+                                    <!-- Dynamic Badge: Class or Subject -->
+                                    <span class="student-class-badge student-badge-display color-class-{{ (loop.index0 + row.row_num + bench.bench_num) % 8 }}"
+                                          data-class="{{ stu.class }}"
+                                          data-subject="{{ stu.subject }}"
+                                          data-class-color-idx="{{ (stu.class | length) % 8 }}"
+                                          data-subject-color-idx="{{ (stu.subject | length) % 8 }}">
+                                        {{ stu.class }}
+                                    </span>
+
+                                    <div class="student-subject" title="{{ stu.subject }}">{{ stu.subject }}</div>
+                                    
+                                    {% if stu.has_class_conflict %}
+                                        <div style="font-size: 0.6rem; color: var(--accent-rose); font-weight: 700; margin-top: 2px;">
+                                            &excl; Class Conflict
+                                        </div>
+                                    {% elif stu.has_subject_relaxation %}
+                                        <div style="font-size: 0.6rem; color: var(--accent-amber); font-weight: 700; margin-top: 2px;">
+                                            &excl; Relaxed Subj
+                                        </div>
+                                    {% endif %}
+                                {% elif s.available %}
+                                    <span style="font-size: 0.72rem; color: var(--text-muted);">Empty</span>
+                                {% else %}
+                                    <span style="font-size: 0.72rem; color: var(--accent-rose);">Unavailable</span>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+
+    <!-- SECTION 2: Downloadable / Printable Allocation Table -->
+    <div class="card">
+        <div class="card-header">
+            <div>
+                <div class="card-title">Examination seating allocation</div>
+                <div class="card-subtitle">Candidate roster with assigned rooms and seats</div>
+            </div>
+            <div class="no-print">
+                <input type="text" id="allocation-search" class="form-input" style="width: 240px; padding: 0.4rem 0.75rem; font-size: 0.8rem;" placeholder="Filter by ID, Class, Subj...">
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="data-table" id="allocation-table">
+                <thead>
+                    <tr>
+                        <th>Room</th>
+                        <th>Seat Code</th>
+                        <th>Seat Location</th>
+                        <th>Student ID</th>
+                        <th>Class / Section</th>
+                        <th>Subject</th>
+                        <th>Accessibility</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in flat_allocation_table %}
+                    <tr>
+                        <td><strong>Room {{ row.room_id }}</strong></td>
+                        <td><code style="font-family: var(--font-mono); color: var(--accent-secondary);">{{ row.seat_id }}</code></td>
+                        <td>{{ row.seat_label }}</td>
+                        <td><strong style="font-family: var(--font-mono); color: var(--text-primary);">{{ row.student_id }}</strong></td>
+                        <td><span class="math-badge badge-info">{{ row.class }}</span></td>
+                        <td>{{ row.subject }}</td>
+                        <td>
+                            {% if row.special_needs == 'Yes' %}
+                                <span class="math-badge badge-success">&#9855; Accessible</span>
+                            {% else %}
+                                <span style="color: var(--text-muted); font-size: 0.78rem;">Standard</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if row.relaxed == 'Yes (Class)' %}
+                                <span class="math-badge badge-danger">&excl; Class Conflict</span>
+                            {% elif row.relaxed == 'Yes (Subject)' %}
+                                <span class="math-badge badge-warning">&excl; Relaxed Subject</span>
+                            {% else %}
+                                <span class="math-badge badge-success">&check; Valid</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- =============================================================== -->
+    <!-- SECTION 3: ACADEMIC DISCRETE MATHEMATICS REPORT                 -->
+    <!-- Specifically formatted for report screenshots & academic audit  -->
+    <!-- =============================================================== -->
+    <div style="margin-top: 2.5rem; margin-bottom: 1.5rem;">
+        <div class="hero-badge">Mathematical validation</div>
+        <h2 style="font-size: 1.85rem; font-weight: 800; letter-spacing: -0.02em;">
+            Discrete Mathematics Theoretical &amp; Computational Report
+        </h2>
+        <p style="color: var(--text-secondary); font-size: 0.95rem;">
+            Computed checks for Pigeonhole bounds, forbidden-position restrictions, graph coloring,
+            the handshaking lemma, logical predicates, and inclusion-exclusion counts.
+        </p>
+    </div>
+
+    <div class="math-report-grid">
+        
+        <!-- CARD 1: Pigeonhole Principle & Feasibility Pre-Check -->
+        <div class="math-card {{ 'status-pass' if feasibility_report.is_feasible else 'status-fail' }}">
+            <div class="math-card-header">
+                <div>
+                    <span class="math-concept-tag">Discrete Math Area: Pigeonhole Principle (PHP)</span>
+                    <h3 class="math-card-title">Step 1 — Necessary-condition pre-check</h3>
+                </div>
+                <span class="math-badge {{ 'badge-success' if feasibility_report.is_feasible else 'badge-danger' }}">
+                    {{ 'PRE-CHECK PASSED' if feasibility_report.is_feasible else 'PROVEN INFEASIBLE' }}
+                </span>
+            </div>
+
+            <div class="math-stat-row">
+                <span class="math-stat-label">Total Student Population:</span>
+                <span class="math-stat-val">{{ feasibility_report.total_students }}</span>
+            </div>
+            <div class="math-stat-row">
+                <span class="math-stat-label">Total Seat Graph Vertices |V|:</span>
+                <span class="math-stat-val">{{ feasibility_report.total_seats }}</span>
+            </div>
+            <div class="math-stat-row">
+                <span class="math-stat-label">Max Independent Set Bound &alpha;(G):</span>
+                <span class="math-stat-val">&alpha;(G) = {{ feasibility_report.independence_number_alpha }}</span>
+            </div>
+
+            <div class="math-formula-box">
+                $$\forall C_k \in \mathcal{C} : |C_k| \le \alpha(G) \implies \lceil |C_k| / \alpha(G) \rceil = 1$$
+            </div>
+
+            <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                <strong>Class Distribution vs Maximum Independent Set Bound:</strong>
+            </p>
+            <div style="font-size: 0.78rem; font-family: var(--font-mono); margin-bottom: 1rem;">
+                {% for cls in feasibility_report.class_analysis %}
+                    <div class="math-list-row">
+                        <span>{{ cls.class }}:</span>
+                        <span class="{{ 'text-danger' if cls.guaranteed_collision else 'text-success' }}">
+                            {{ cls.count }} / {{ cls.max_independent_bound }} 
+                            ({{ (cls.ratio * 100) | round(1) }}% capacity)
+                            {% if cls.guaranteed_collision %}<strong>&excl; PHP Overflow</strong>{% endif %}
+                        </span>
+                    </div>
+                {% endfor %}
+            </div>
+
+            {% if feasibility_report.warnings %}
+                <p style="font-size: 0.8rem; color: var(--accent-amber); font-weight: 600; margin-bottom: 0.4rem;">
+                    Local Neighborhood Saturation Warnings:
+                </p>
+                <div class="notice-panel" style="max-height: 140px; overflow-y: auto; font-size: 0.75rem;">
+                    {% for w in feasibility_report.warnings %}
+                        <div class="text-warning" style="margin-bottom: 0.35rem;">&bull; {{ w }}</div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="text-success" style="font-size: 0.8rem;">
+                    &check; This heuristic check produced no local neighborhood saturation warnings.
+                </div>
+            {% endif %}
+        </div>
+
+        <!-- CARD 2: Forbidden Positions & Rook Polynomial -->
+        <div class="math-card status-pass">
+            <div class="math-card-header">
+                <div>
+                    <span class="math-concept-tag">Discrete Math Area: Rook Polynomials / Forbidden Positions</span>
+                    <h3 class="math-card-title">Step 2 — Accessible seating</h3>
+                </div>
+                <span class="math-badge badge-success">RESTRICTION SATISFIED</span>
+            </div>
+
+            <div class="math-stat-row">
+                <span class="math-stat-label">Students requiring accessible seating (m):</span>
+                <span class="math-stat-val">{{ forbidden_math.special_needs_count }}</span>
+            </div>
+            <div class="math-stat-row">
+                <span class="math-stat-label">Designated Accessible Seats (|A|):</span>
+                <span class="math-stat-val">{{ forbidden_math.accessible_seats_count }}</span>
+            </div>
+            <div class="math-stat-row">
+                <span class="math-stat-label">Total Board Cells (m &times; n):</span>
+                <span class="math-stat-val">{{ forbidden_math.total_board_dimension }}</span>
+            </div>
+            <div class="math-stat-row">
+                <span class="math-stat-label">Forbidden Sub-board Cells |B|:</span>
+                <span class="math-stat-val text-danger">{{ forbidden_math.forbidden_cells_count }}</span>
+            </div>
+            <div class="math-stat-row">
+                <span class="math-stat-label">Permitted Positions Sub-board |B'|:</span>
+                <span class="math-stat-val text-success">{{ forbidden_math.permitted_cells_count }}</span>
+            </div>
+
+            <div class="math-formula-box">
+                $$R(x, B) = \sum_{k=0}^{m} r_k(B) x^k \quad \text{s.t. rooks} \in B' = (S_{\text{req}} \times V) \setminus B$$
+            </div>
+
+            <div style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.5;">
+                <strong>Combinatorial resolution:</strong> Students requiring accessible seating are assigned from the permitted sub-board
+                $B'$ before the remaining allocation. Non-accessible positions are excluded for those students.
+            </div>
+        </div>
+
+        <!-- CARD 3: Graph Coloring & Handshaking Lemma -->
+        <div class="math-card status-pass">
+            <div class="math-card-header">
+                <div>
+                    <span class="math-concept-tag">Discrete Math Area: Graph Theory &amp; Handshaking</span>
+                    <h3 class="math-card-title">Step 3 — Conflict Graph &amp; Degree Analysis</h3>
+                </div>
+                <span class="math-badge badge-success">HANDSHAKING VERIFIED</span>
+            </div>
+
+            <div class="math-stat-row">
+                <span class="math-stat-label">Student Conflict Graph Vertices |V|:</span>
+                <span class="math-stat-val">{{ handshaking_report.num_vertices }}</span>
+            </div>
+            <div class="math-stat-row">
+                <span class="math-stat-label">Conflict Edges |E| (Same-Class):</span>
+                <span class="math-stat-val">{{ handshaking_report.num_edges }}</span>
+            </div>
+            <div class="math-stat-row">
+                <span class="math-stat-label">Sum of Vertex Degrees &sum; deg(v):</span>
+                <span class="math-stat-val">{{ handshaking_report.sum_degrees }}</span>
+            </div>
+            <div class="math-stat-row">
+                <span class="math-stat-label">Handshaking identity 2 &times; |E|:</span>
+                <span class="math-stat-val">{{ handshaking_report.two_times_edges }}</span>
+            </div>
+            <div class="math-stat-row">
+                <span class="math-stat-label">Greedy coloring groups produced:</span>
+                <span class="math-stat-val">{{ chromatic_number }}</span>
+            </div>
+
+            <div class="math-formula-box">
+                $$\sum_{v \in V} \deg(v) = 2 |E| \iff {{ handshaking_report.sum_degrees }} = 2 \times {{ handshaking_report.num_edges }} \quad (\top)$$
+            </div>
+
+            <p style="font-size: 0.78rem; color: var(--text-muted);">
+                &check; The handshaking identity holds. The graph has {{ handshaking_report.odd_degree_vertices_count }} odd-degree vertices; this count is even, as required by the lemma.
+            </p>
+        </div>
+
+        <!-- CARD 4: Chromatic Polynomial Worked Example -->
+        <div class="math-card status-pass">
+            <div class="math-card-header">
+                <div>
+                    <span class="math-concept-tag">Discrete Math Area: Chromatic Polynomials</span>
+                    <h3 class="math-card-title">Step 4 — Chromatic polynomial example</h3>
+                </div>
+                <span class="math-badge badge-info">VERIFIED EXAMPLE</span>
+            </div>
+
+            <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+                <strong>Worked Module:</strong> {{ chromatic_worked_example.example_name }} (|V| = 4, |E| = 4)
+            </div>
+
+            <div class="math-formula-box">
+                $$P(C_4, \lambda) = {{ chromatic_worked_example.polynomial_latex }} = {{ chromatic_worked_example.factorized_latex }}$$
+            </div>
+
+            <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.4rem;">
+                <strong>Deletion-Contraction Recurrence Derivation:</strong>
+            </p>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+                {% for step in chromatic_worked_example.derivation_steps %}
+                    <div class="derivation-step">{{ step }}</div>
+                {% endfor %}
+            </div>
+
+            <div class="math-stat-row">
+                <span class="math-stat-label">P(C_4, 1) [1 color]:</span>
+                <span class="math-stat-val">{{ chromatic_worked_example.evaluations[1] }} valid colorings</span>
+            </div>
+            <div class="math-stat-row">
+                <span class="math-stat-label">P(C_4, 2) [2 colors]:</span>
+                <span class="math-stat-val">{{ chromatic_worked_example.evaluations[2] }} valid colorings</span>
+            </div>
+            <div class="math-stat-row">
+                <span class="math-stat-label">P(C_4, 3) [3 colors]:</span>
+                <span class="math-stat-val">{{ chromatic_worked_example.evaluations[3] }} valid colorings</span>
+            </div>
+            <div class="math-stat-row">
+                <span class="math-stat-label">P(C_4, 4) [4 colors]:</span>
+                <span class="math-stat-val">{{ chromatic_worked_example.evaluations[4] }} valid colorings</span>
+            </div>
+        </div>
+
+        <!-- CARD 5: Propositional Logic Formal Validation -->
+        <div class="math-card {{ 'status-pass' if validation_certificate.overall_valid else 'status-fail' }}">
+            <div class="math-card-header">
+                <div>
+                    <span class="math-concept-tag">Discrete Math Area: Propositional &amp; Predicate Logic</span>
+                    <h3 class="math-card-title">Step 5 — Formal Propositional Validation</h3>
+                </div>
+                <span class="math-badge {{ 'badge-success' if validation_certificate.overall_valid else 'badge-danger' }}">
+                    {{ 'HARD CONSTRAINTS VALID' if validation_certificate.overall_valid else 'HARD CONSTRAINT FAILURE' }}
+                </span>
+            </div>
+
+            <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">
+                Evaluated {{ validation_certificate.occupied_edges_evaluated }} occupied physical seat edges:
+            </p>
+
+            {% for prop in validation_certificate.propositions %}
+            <div class="proposition-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem;">
+                    <span style="font-size: 0.82rem; font-weight: 700; color: var(--text-primary);">
+                        Proposition {{ prop.id }} ({{ prop.type }})
+                    </span>
+                    <span class="math-badge {{ 'badge-success' if prop.satisfied else ('badge-warning' if 'SOFT' in prop.type else 'badge-danger') }}">
+                        {{ prop.truth_value }}
+                    </span>
+                </div>
+                <div style="font-size: 0.78rem; font-family: var(--font-mono); color: var(--accent-secondary); margin-bottom: 0.25rem;">
+                    $${{ prop.latex_formula }}$$
+                </div>
+                <div style="font-size: 0.75rem; color: var(--text-muted);">
+                    Violations / Relaxations: <strong>{{ prop.violation_count }}</strong> instances.
+                </div>
+            </div>
+            {% endfor %}
+
+            {% if relaxed_constraints %}
+            <div style="margin-top: 0.75rem;">
+                <span style="font-size: 0.78rem; font-weight: 600; color: var(--accent-amber);">
+                    &bull; Relaxed Constraint Catalog (Soft Subject Collisions):
+                </span>
+                <div style="max-height: 100px; overflow-y: auto; font-size: 0.72rem; margin-top: 0.25rem; font-family: var(--font-mono);">
+                    {% for r in relaxed_constraints %}
+                        <div class="text-warning">
+                            &bull; [{{ r.seat_a_label }} &harr; {{ r.seat_b_label }}]: Same subject "{{ r.subject }}" (Students {{ r.student_a }} &amp; {{ r.student_b }})
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- CARD 6: Combinatorics & Principle of Inclusion-Exclusion -->
+        <div class="math-card status-pass">
+            <div class="math-card-header">
+                <div>
+                    <span class="math-concept-tag">Discrete Math Area: Counting &amp; Inclusion-Exclusion</span>
+                    <h3 class="math-card-title">Step 6 — Combinatorial Arrangements (PIE)</h3>
+                </div>
+                <span class="math-badge badge-info">THEORETICAL BOUNDS</span>
+            </div>
+
+            <div class="math-stat-row">
+                <span class="math-stat-label">Students (n) / Total Seats (S):</span>
+                <span class="math-stat-val">{{ counting_report.n_students }} students in {{ counting_report.total_seats }} seats</span>
+            </div>
+            <div class="math-stat-row">
+                <span class="math-stat-label">Total Unconstrained Seatings P(S, n):</span>
+                <span class="math-stat-val" style="color: var(--accent-secondary);">{{ counting_report.total_arrangements_formatted }}</span>
+            </div>
+            <div class="math-stat-row">
+                <span class="math-stat-label">First-Order PIE Term (S_1):</span>
+                <span class="math-stat-val">{{ counting_report.S_1_formatted }}</span>
+            </div>
+            <div class="math-stat-row">
+                <span class="math-stat-label">Second-Order Correction (S_2):</span>
+                <span class="math-stat-val">{{ counting_report.S_2_formatted }}</span>
+            </div>
+            <div class="math-stat-row">
+                <span class="math-stat-label">Bonferroni Violation Lower Bound:</span>
+                <span class="math-stat-val text-danger">{{ counting_report.lower_bound_formatted }}</span>
+            </div>
+            <div class="math-stat-row">
+                <span class="math-stat-label">Bonferroni Violation Upper Bound:</span>
+                <span class="math-stat-val text-warning">{{ counting_report.upper_bound_formatted }}</span>
+            </div>
+
+            <div class="math-formula-box">
+                $${{ counting_report.product_rule_latex }}$$
+            </div>
+            <div class="math-formula-box">
+                $${{ counting_report.bonferroni_latex }}$$
+            </div>
+
+            <div style="font-size: 0.78rem; color: var(--text-secondary); line-height: 1.5;">
+                {% for exp in counting_report.explanation %}
+                    <div style="margin-bottom: 0.35rem;">{{ exp }}</div>
+                {% endfor %}
+            </div>
+        </div>
+
+    </div>
+
+{% endif %}
+{% endblock %}

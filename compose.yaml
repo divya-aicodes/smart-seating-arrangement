@@ -1,0 +1,54 @@
+services:
+  database:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-smart_seating}
+      POSTGRES_USER: ${POSTGRES_USER:-smart_seating}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend
+
+  web:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-smart_seating}:${POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB:-smart_seating}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env.production}
+      SESSION_COOKIE_SECURE: "true"
+      SESSION_COOKIE_SAMESITE: ${SESSION_COOKIE_SAMESITE:-Lax}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      CORS_ALLOW_CREDENTIALS: ${CORS_ALLOW_CREDENTIALS:-false}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Set ALLOWED_HOSTS in .env.production}
+      HEALTHCHECK_HOST: ${HEALTHCHECK_HOST:?Set HEALTHCHECK_HOST in .env.production}
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
+      RUN_MIGRATIONS: "true"
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+      GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
+      GUNICORN_TIMEOUT: ${GUNICORN_TIMEOUT:-120}
+      PORT: "8000"
+    ports:
+      - "127.0.0.1:${APP_PORT:-8000}:8000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - backend
+
+volumes:
+  postgres-data:
+
+networks:
+  backend:
+    driver: bridge

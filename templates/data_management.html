@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+
+{% block title %}Data Management | Examination Seating Planner{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <div class="hero-badge">Data management</div>
+    <h1 class="hero-title">Examination records</h1>
+    <p class="hero-desc">
+        Import institutional CSV records or generate reproducible synthetic datasets.
+        Both paths write to the same validated database schema.
+    </p>
+</section>
+
+<div class="form-grid" style="margin-bottom: 1.5rem;">
+    <div class="card"><div class="card-title">{{ stats.datasets }}</div><div class="card-subtitle">Datasets</div></div>
+    <div class="card"><div class="card-title">{{ stats.students }}</div><div class="card-subtitle">Persisted Students</div></div>
+    <div class="card"><div class="card-title">{{ stats.exams }}</div><div class="card-subtitle">Exam Sessions</div></div>
+    <div class="card"><div class="card-title">{{ stats.rooms }}</div><div class="card-subtitle">Persisted Rooms</div></div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div>
+            <div class="card-title">Import Real Institutional Data</div>
+            <div class="card-subtitle">Creates a dataset, students, subjects, an exam session, and registrations transactionally.</div>
+        </div>
+        <a href="{{ url_for('sample_csv') }}" class="btn btn-outline btn-sm">Download Header Template</a>
+    </div>
+    <form action="{{ url_for('data.import_students') }}" method="POST" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-grid">
+            <div class="form-group">
+                <label class="form-label" for="real_dataset_name">Dataset Name</label>
+                <input id="real_dataset_name" name="dataset_name" class="form-input" maxlength="150" required placeholder="December 2026 Examination Import">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="real_dataset_version">Version</label>
+                <input id="real_dataset_version" name="dataset_version" class="form-input" maxlength="50" required value="{{ today }}">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="real_exam_date">Exam Date</label>
+                <input id="real_exam_date" type="date" name="exam_date" class="form-input" required value="{{ today }}">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="real_session_name">Session Name</label>
+                <input id="real_session_name" name="session_name" class="form-input" maxlength="80" required value="Morning Session">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="real_start_time">Start Time</label>
+                <input id="real_start_time" type="time" name="start_time" class="form-input" required value="09:00">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="real_end_time">End Time</label>
+                <input id="real_end_time" type="time" name="end_time" class="form-input" required value="12:00">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="academic_year">Academic Year</label>
+                <input id="academic_year" name="academic_year" class="form-input" maxlength="20" required value="2026-27">
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="real_csv_file">Student CSV</label>
+                <input id="real_csv_file" type="file" name="csv_file" class="form-input" accept=".csv,text/csv" required>
+            </div>
+        </div>
+        <button type="submit" class="btn btn-primary">Import and Validate Real Data</button>
+    </form>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div>
+            <div class="card-title">Generate Reproducible Synthetic Data</div>
+            <div class="card-subtitle">Every generated record is labelled synthetic and linked to its seed and dataset version.</div>
+        </div>
+    </div>
+    <form action="{{ url_for('data.generate_synthetic') }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-grid">
+            <div class="form-group"><label class="form-label">Dataset Name</label><input name="dataset_name" class="form-input" required value="Synthetic Seating Dataset"></div>
+            <div class="form-group"><label class="form-label">Version</label><input name="dataset_version" class="form-input" required value="{{ today }}-seed42"></div>
+            <div class="form-group"><label class="form-label">Generation Seed</label><input type="number" name="seed" class="form-input" min="0" max="2147483647" value="42" required></div>
+            <div class="form-group"><label class="form-label">Exam Date</label><input type="date" name="exam_date" class="form-input" value="{{ today }}" required></div>
+            <div class="form-group"><label class="form-label">Students</label><input type="number" name="student_count" class="form-input" min="2" max="1000" value="60" required></div>
+            <div class="form-group"><label class="form-label">Classes</label><input type="number" name="class_count" class="form-input" min="2" max="50" value="6" required></div>
+            <div class="form-group"><label class="form-label">Subjects</label><input type="number" name="subject_count" class="form-input" min="1" max="20" value="4" required></div>
+            <div class="form-group"><label class="form-label">Rooms</label><input type="number" name="room_count" class="form-input" min="1" max="20" value="3" required></div>
+            <div class="form-group"><label class="form-label">Rows per Room</label><input type="number" name="rows_per_room" class="form-input" min="1" max="20" value="5" required></div>
+            <div class="form-group"><label class="form-label">Benches per Row</label><input type="number" name="benches_per_row" class="form-input" min="1" max="15" value="3" required></div>
+            <div class="form-group"><label class="form-label">Seats per Bench</label><select name="seats_per_bench" class="form-select"><option value="1">1</option><option value="2" selected>2</option></select></div>
+        </div>
+        <button type="submit" class="btn btn-primary">Generate and Persist Synthetic Dataset</button>
+    </form>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div>
+            <div class="card-title">Add a Persisted Room</div>
+            <div class="card-subtitle">Use this after a real student import. Synthetic generation creates rooms automatically.</div>
+        </div>
+    </div>
+    {% if datasets %}
+    <form action="{{ url_for('data.create_room') }}" method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-grid">
+            <div class="form-group">
+                <label class="form-label">Dataset</label>
+                <select name="dataset_id" class="form-select" required>
+                    {% for dataset in datasets %}<option value="{{ dataset.id }}">{{ dataset.name }} · {{ dataset.version }} [{{ dataset.source_type | upper }}]</option>{% endfor %}
+                </select>
+            </div>
+            <div class="form-group"><label class="form-label">Room Number</label><input name="room_number" class="form-input" required placeholder="A-101"></div>
+            <div class="form-group"><label class="form-label">Building</label><input name="building" class="form-input" required placeholder="Academic Block"></div>
+            <div class="form-group"><label class="form-label">Floor</label><input name="floor" class="form-input" placeholder="1"></div>
+            <div class="form-group"><label class="form-label">Rows</label><input type="number" name="rows" class="form-input" min="1" max="20" value="5" required></div>
+            <div class="form-group"><label class="form-label">Benches per Row</label><input type="number" name="benches_per_row" class="form-input" min="1" max="15" value="3" required></div>
+            <div class="form-group"><label class="form-label">Seats per Bench</label><select name="seats_per_bench" class="form-select"><option value="1">1</option><option value="2" selected>2</option></select></div>
+            <div class="form-group"><label class="form-label">Accessible Seats</label><select name="accessible_rule" class="form-select"><option value="row_1_and_aisle">Front Row + Aisles</option><option value="row_1">Front Row</option><option value="aisle">Aisles</option><option value="front_aisle_only">Front Aisle Only</option></select></div>
+        </div>
+        <button type="submit" class="btn btn-primary">Create Room and Seat Records</button>
+    </form>
+    {% else %}
+    <p style="color: var(--text-muted);">Create or import a dataset before adding rooms.</p>
+    {% endif %}
+</div>
+
+<div class="card">
+    <div class="card-header"><div class="card-title">Persisted Datasets</div></div>
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead><tr><th>Name</th><th>Version</th><th>Source</th><th>Seed</th><th>Status</th><th>Created</th></tr></thead>
+            <tbody>
+                {% for dataset in datasets %}
+                <tr><td>{{ dataset.name }}</td><td>{{ dataset.version }}</td><td><span class="math-badge {{ 'badge-info' if dataset.source_type == 'synthetic' else 'badge-success' }}">{{ dataset.source_type | upper }}</span></td><td>{{ dataset.generation_seed if dataset.generation_seed is not none else '—' }}</td><td>{{ dataset.status }}</td><td>{{ dataset.created_at }}</td></tr>
+                {% else %}<tr><td colspan="6">No persisted datasets yet.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header"><div class="card-title">Recent Imports</div></div>
+    <div class="table-responsive">
+        <table class="data-table">
+            <thead><tr><th>Type</th><th>Source</th><th>Status</th><th>Valid Rows</th><th>Invalid Rows</th><th>File</th></tr></thead>
+            <tbody>
+                {% for item in imports %}
+                <tr><td>{{ item.import_type }}</td><td>{{ item.source_type }}</td><td>{{ item.status }}</td><td>{{ item.valid_rows }}</td><td>{{ item.invalid_rows }}</td><td>{{ item.original_filename or 'Generated internally' }}</td></tr>
+                {% else %}<tr><td colspan="6">No imports recorded yet.</td></tr>{% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div style="margin-bottom: 2rem;"><a href="{{ url_for('index') }}" class="btn btn-primary">Continue to seating setup</a></div>
+{% endblock %}
