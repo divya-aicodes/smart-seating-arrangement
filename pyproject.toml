@@ -18,3 +18,4 @@ dependencies = [
 
 [tool.vercel.scripts]
 build = "python -m flask --app app db upgrade"
+
