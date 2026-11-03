@@ -152,6 +152,23 @@
                     <span class="section-note">Calculated from Step 2</span>
                 </header>
 
+                <fieldset class="room-limit-panel">
+                    <legend>College room limits</legend>
+                    <p>Enter the largest room the college can actually use and the number of rooms available for this examination.</p>
+                    <div class="field-grid field-grid-two">
+                        <div class="field-group">
+                            <label for="max_seats_per_room">Maximum seats in one room</label>
+                            <input id="max_seats_per_room" name="max_seats_per_room" class="field-control" type="number" value="40" min="4" max="300" required>
+                            <small class="field-help">Recommendations will never exceed this room capacity.</small>
+                        </div>
+                        <div class="field-group">
+                            <label for="max_rooms">Maximum rooms available</label>
+                            <input id="max_rooms" name="max_rooms" class="field-control" type="number" value="10" min="1" max="10" required>
+                            <small class="field-help">Only rooms available for this seating plan.</small>
+                        </div>
+                    </div>
+                </fieldset>
+
                 <div class="recommendation-workspace" data-layout-recommendations data-endpoint="{{ url_for('layout_recommendations') }}" aria-live="polite">
                     <div class="recommendation-empty" data-recommendation-empty>
                         <span class="recommendation-empty-number">01</span>

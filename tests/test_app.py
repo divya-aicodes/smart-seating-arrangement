@@ -44,6 +44,8 @@ class TestFlaskIntegration(unittest.TestCase):
             response.data.index(b"Describe the physical room setup"),
         )
         self.assertIn(b"data-layout-recommendations", response.data)
+        self.assertIn(b"Maximum seats in one room", response.data)
+        self.assertIn(b"Maximum rooms available", response.data)
 
     def test_sample_csv_downloads(self):
         for preset in ["balanced", "pigeonhole", "multiroom"]:
@@ -329,13 +331,18 @@ class TestFlaskIntegration(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(payload["student_count"], 120)
         self.assertEqual(payload["largest_class"], 36)
+        self.assertEqual(payload["limits"], {
+            "max_seats_per_room": 40,
+            "max_rooms": 10,
+        })
         self.assertEqual(
             payload["recommendations"][0],
             {
-                "rooms": 2,
+                "rooms": 4,
                 "rows": 4,
-                "benches": 4,
+                "benches": 2,
                 "seats_per_bench": 4,
+                "capacity_per_room": 32,
                 "capacity": 128,
                 "spare_seats": 8,
                 "independence_bound": 64,
@@ -364,9 +371,9 @@ class TestFlaskIntegration(unittest.TestCase):
             "/assign",
             data={
                 "data_mode": "manual",
-                "num_rooms": "2",
+                "num_rooms": "4",
                 "rows": "4",
-                "cols": "4",
+                "cols": "2",
                 "seats_per_bench": "4",
                 "accessible_rule": "row_1_and_aisle",
                 "invigilator_ratio": "20",
@@ -380,6 +387,52 @@ class TestFlaskIntegration(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Seating plan complete", response.data)
         self.assertNotIn(b"Application Error", response.data)
+
+    def test_layout_recommendations_respect_college_room_limits(self):
+        students = "\n".join(
+            f"S{index},Class{index % 4},Mathematics,N"
+            for index in range(1, 81)
+        )
+        response = self.client.post(
+            "/api/layout-recommendations",
+            data={
+                "student_data_text": (
+                    "ID,Class,Subject,Special_Needs\n" + students
+                ),
+                "max_seats_per_room": "24",
+                "max_rooms": "5",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["recommendations"])
+        self.assertTrue(all(
+            item["capacity_per_room"] <= 24 and item["rooms"] <= 5
+            for item in payload["recommendations"]
+        ))
+
+    def test_layout_recommendations_explain_impossible_college_limits(self):
+        students = "\n".join(
+            f"S{index},Class{index % 4},Mathematics,N"
+            for index in range(1, 81)
+        )
+        response = self.client.post(
+            "/api/layout-recommendations",
+            data={
+                "student_data_text": (
+                    "ID,Class,Subject,Special_Needs\n" + students
+                ),
+                "max_seats_per_room": "20",
+                "max_rooms": "2",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(
+            "No verified layout fits within 20 seats per room and 2 available room(s)",
+            response.get_json()["error"]["message"],
+        )
 
     def test_layout_recommendation_api_rejects_invalid_csv(self):
         response = self.client.post(

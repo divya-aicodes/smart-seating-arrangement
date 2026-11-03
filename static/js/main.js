@@ -155,8 +155,10 @@ function initLayoutRecommendations() {
     const csvInput = document.getElementById("csv_file");
     const textInput = document.getElementById("student_data_text");
     const accessibility = document.getElementById("accessible_rule");
+    const maxSeatsPerRoom = document.getElementById("max_seats_per_room");
+    const maxRooms = document.getElementById("max_rooms");
     const adjacencyInputs = Array.from(document.querySelectorAll("input[name='adjacency_rule']"));
-    if (!workspace || !csvInput || !textInput || !accessibility || !adjacencyInputs.length) return;
+    if (!workspace || !csvInput || !textInput || !accessibility || !maxSeatsPerRoom || !maxRooms || !adjacencyInputs.length) return;
 
     const empty = workspace.querySelector("[data-recommendation-empty]");
     const loading = workspace.querySelector("[data-recommendation-loading]");
@@ -195,6 +197,8 @@ function initLayoutRecommendations() {
         else formData.append("student_data_text", textInput.value);
         formData.append("csrf_token", csrfToken);
         formData.append("accessible_rule", accessibility.value);
+        formData.append("max_seats_per_room", maxSeatsPerRoom.value);
+        formData.append("max_rooms", maxRooms.value);
         formData.append(
             "adjacency_rule",
             adjacencyInputs.find(input => input.checked)?.value || "orthogonal"
@@ -227,6 +231,8 @@ function initLayoutRecommendations() {
     csvInput.addEventListener("change", calculate);
     textInput.addEventListener("input", schedule);
     accessibility.addEventListener("change", calculate);
+    maxSeatsPerRoom.addEventListener("input", schedule);
+    maxRooms.addEventListener("input", schedule);
     adjacencyInputs.forEach(input => input.addEventListener("change", calculate));
 }
 
@@ -235,7 +241,7 @@ function renderLayoutRecommendations(payload, summary, list) {
     const heading = document.createElement("strong");
     heading.textContent = `${payload.student_count} students analysed`;
     const detail = document.createElement("span");
-    detail.textContent = `Largest class: ${payload.largest_class} · Accessibility requests: ${payload.accessibility_count}`;
+    detail.textContent = `Largest class: ${payload.largest_class} · Accessibility requests: ${payload.accessibility_count} · Up to ${payload.limits.max_seats_per_room} seats per room · Up to ${payload.limits.max_rooms} rooms`;
     summary.append(heading, detail);
 
     const cards = payload.recommendations.map(item => {
@@ -255,7 +261,7 @@ function renderLayoutRecommendations(payload, summary, list) {
 
         const explanation = document.createElement("p");
         explanation.className = "layout-choice-explanation";
-        explanation.textContent = `If you choose this setup, ${payload.student_count} students are arranged across ${item.rooms} room${item.rooms === 1 ? "" : "s"}, leaving ${item.spare_seats} spare seat${item.spare_seats === 1 ? "" : "s"}. It provides ${item.accessible_seats} permitted accessible positions and a same-class separation bound of ${item.independence_bound}.`;
+        explanation.textContent = `If you choose this setup, each room has ${item.capacity_per_room} seats. ${payload.student_count} students are arranged across ${item.rooms} room${item.rooms === 1 ? "" : "s"}, leaving ${item.spare_seats} spare seat${item.spare_seats === 1 ? "" : "s"}. It provides ${item.accessible_seats} permitted accessible positions and a same-class separation bound of ${item.independence_bound}.`;
 
         const button = document.createElement("button");
         button.className = "button button-secondary layout-choice-button";

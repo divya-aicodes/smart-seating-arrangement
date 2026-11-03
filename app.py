@@ -468,7 +468,13 @@ def _layout_is_solvable(
     )["overall_valid"]
 
 
-def recommend_room_layouts(students, diagonal=False, accessible_rule="row_1_and_aisle"):
+def recommend_room_layouts(
+    students,
+    diagonal=False,
+    accessible_rule="row_1_and_aisle",
+    max_seats_per_room=300,
+    max_rooms=10,
+):
     """Return practical layouts that pass bounds and the actual allocation pipeline."""
     if not students:
         return []
@@ -480,11 +486,14 @@ def recommend_room_layouts(students, diagonal=False, accessible_rule="row_1_and_
 
     for seats_per_bench in (4, 3, 2):
         candidates = []
-        for rooms in range(1, 11):
+        for rooms in range(1, max_rooms + 1):
             for rows in range(2, 13):
                 for benches in range(2, 7):
                     columns = benches * seats_per_bench
-                    capacity = rooms * rows * columns
+                    capacity_per_room = rows * columns
+                    if capacity_per_room > max_seats_per_room:
+                        continue
+                    capacity = rooms * capacity_per_room
                     if capacity < student_count:
                         continue
                     if diagonal:
@@ -525,6 +534,7 @@ def recommend_room_layouts(students, diagonal=False, accessible_rule="row_1_and_
                 "rows": rows,
                 "benches": benches,
                 "seats_per_bench": seats_per_bench,
+                "capacity_per_room": rows * benches * seats_per_bench,
                 "capacity": capacity,
                 "spare_seats": capacity - student_count,
                 "independence_bound": alpha,
@@ -655,6 +665,20 @@ def layout_recommendations():
             {"row_1", "aisle", "row_1_and_aisle", "front_aisle_only"},
             "accessible-seat rule",
         )
+        max_seats_per_room = parse_bounded_int(
+            "max_seats_per_room",
+            40,
+            4,
+            300,
+            "Maximum seats per room",
+        )
+        max_rooms = parse_bounded_int(
+            "max_rooms",
+            10,
+            1,
+            10,
+            "Maximum rooms available",
+        )
         csv_file = request.files.get("csv_file")
         manual_text = request.form.get("student_data_text", "").strip()
         if csv_file and csv_file.filename:
@@ -668,16 +692,24 @@ def layout_recommendations():
             students,
             diagonal=adjacency_rule == "diagonal",
             accessible_rule=accessible_rule,
+            max_seats_per_room=max_seats_per_room,
+            max_rooms=max_rooms,
         )
         if not recommendations:
             raise ValueError(
-                "No layout within the supported room limits satisfies these records and rules."
+                f"No verified layout fits within {max_seats_per_room} seats per room "
+                f"and {max_rooms} available room(s). Increase one of these limits or "
+                "adjust the adjacency rule."
             )
 
         return jsonify({
             "student_count": len(students),
             "largest_class": max(Counter(s["class"] for s in students).values()),
             "accessibility_count": sum(bool(s["special_needs"]) for s in students),
+            "limits": {
+                "max_seats_per_room": max_seats_per_room,
+                "max_rooms": max_rooms,
+            },
             "recommendations": recommendations,
         })
     except ValueError as error:

@@ -205,6 +205,9 @@ code { padding: 0.12rem 0.3rem; background: var(--surface-alt); border: 1px soli
 .schema-note { margin-top: 0.65rem; color: var(--muted); font-size: 0.68rem; line-height: 1.5; }
 .schema-note strong { color: var(--ink-soft); }
 .code-input { min-height: 175px; resize: vertical; font-family: var(--font-mono); font-size: 0.75rem; line-height: 1.55; }
+.room-limit-panel { margin-bottom: 1rem; padding: 1rem; background: var(--blue-soft); border: 1px solid #bfd0dc; }
+.room-limit-panel legend { padding: 0 0.35rem; color: var(--navy); font-size: 0.8rem; font-weight: 700; }
+.room-limit-panel > p { margin-bottom: 0.85rem; color: var(--ink-soft); font-size: 0.74rem; }
 .recommendation-workspace { margin-bottom: 1.25rem; padding: 1rem; background: #f7f9f8; border: 1px solid var(--line); }
 .recommendation-empty, .recommendation-loading { min-height: 88px; display: flex; align-items: center; gap: 0.9rem; }
 .recommendation-empty-number { width: 42px; height: 42px; display: grid; place-items: center; flex: 0 0 42px; border: 1px solid var(--line-strong); color: var(--orange); font-family: var(--font-mono); font-size: 0.72rem; }
