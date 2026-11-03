@@ -55,8 +55,9 @@ as imported institutional data.
 - Credentialed CORS remains disabled unless explicitly enabled.
 - Production startup requires an explicit database URL, secret key, and allowed
   host list.
-- Responses apply defensive headers including a content security policy,
-  `X-Frame-Options: DENY`, MIME-sniffing protection, and referrer restrictions.
+- Responses apply defensive headers including `X-Frame-Options: DENY`,
+  MIME-sniffing protection, referrer and permissions restrictions, and HSTS in
+  production.
 - Uploads and request payloads are size-limited and validated before persistence.
 
 ## Local development
