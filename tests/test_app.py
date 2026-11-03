@@ -12,7 +12,7 @@ from pypdf import PdfReader
 
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
-from app import app, parse_csv_students, MAX_UPLOAD_BYTES
+from app import app, parse_csv_students, recommend_room_layouts, MAX_UPLOAD_BYTES
 from extensions import db
 from models import AuditLog, DataImport, Dataset, Exam, Room, SeatingRun, Student
 
@@ -295,6 +295,32 @@ class TestFlaskIntegration(unittest.TestCase):
         self.assertEqual(res.status_code, 422)
         self.assertIn(b"Pigeonhole", res.data)
         self.assertIn(b"No seating plan was generated", res.data)
+        self.assertIn(b"Recommended layouts for this CSV", res.data)
+        self.assertIn(b"Independent bound", res.data)
+
+    def test_layout_recommendations_follow_csv_distribution(self):
+        students = []
+        for class_name, count in {
+            "Electronics": 36,
+            "Computer Science": 32,
+            "Mechanical": 27,
+            "Civil": 25,
+        }.items():
+            students.extend(
+                {"id": f"{class_name}-{index}", "class": class_name, "special_needs": False}
+                for index in range(count)
+            )
+
+        recommendations = recommend_room_layouts(students, diagonal=False)
+        four_seat = recommendations[0]
+        self.assertEqual(four_seat["student_count"], 120)
+        self.assertEqual(four_seat["largest_class"], 36)
+        self.assertEqual(four_seat["rooms"], 2)
+        self.assertEqual(four_seat["rows"], 5)
+        self.assertEqual(four_seat["benches"], 3)
+        self.assertEqual(four_seat["seats_per_bench"], 4)
+        self.assertEqual(four_seat["capacity"], 120)
+        self.assertGreaterEqual(four_seat["independence_bound"], 36)
 
     def test_duplicate_student_ids_are_rejected(self):
         csv_text = (

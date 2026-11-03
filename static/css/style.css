@@ -355,6 +355,23 @@ code { padding: 0.12rem 0.3rem; background: var(--surface-alt); border: 1px soli
 /* Error page */
 .error-page { max-width: 760px; padding-block: 7rem; text-align: center; }.error-code { width: 64px; height: 64px; margin: 0 auto 1rem; display: grid; place-items: center; border: 2px solid var(--red); color: var(--red); font-family: var(--font-display); font-size: 2rem; font-weight: 700; }.error-page .eyebrow span { justify-content: center; }.error-page h1 { font-size: clamp(2.8rem, 6vw, 4.6rem); }.error-message { max-width: 620px; margin: 1rem auto 0; color: var(--ink-soft); font-size: 1rem; }.error-detail-list { margin-top: 1.5rem; padding: 1rem; background: #fff; border: 1px solid var(--line); text-align: left; }.error-detail-list strong { color: var(--navy); }.error-detail-list ul { margin: 0.6rem 0 0 1.2rem; color: var(--ink-soft); font-size: 0.78rem; }.error-detail-list li + li { margin-top: 0.3rem; }.error-actions { margin-top: 1.5rem; }
 
+.layout-recommendations { margin-top: 1.2rem; text-align: left; }
+.error-page.has-recommendations { max-width: 1180px; }
+.recommendation-heading { margin-bottom: 0.7rem; display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; }
+.recommendation-heading strong { color: var(--navy); font-family: var(--font-display); font-size: 1.35rem; }
+.recommendation-heading span { max-width: 610px; color: var(--muted); font-size: 0.72rem; text-align: right; }
+.recommendation-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.65rem; }
+.recommendation-card { padding: 0.85rem; background: #fff; border: 1px solid var(--line); border-top: 3px solid var(--blue); box-shadow: var(--shadow); }
+.recommendation-label { color: var(--orange); font-family: var(--font-mono); font-size: 0.62rem; font-weight: 600; text-transform: uppercase; }
+.recommendation-card h2 { margin-top: 0.28rem; font-size: 1.15rem; }
+.recommendation-formula { margin-top: 0.55rem; padding: 0.48rem; background: var(--surface-alt); color: var(--ink-soft); font-family: var(--font-mono); font-size: 0.65rem; }
+.recommendation-formula strong { color: var(--green); }
+.recommendation-card dl { margin-top: 0.5rem; display: grid; grid-template-columns: 1fr 1fr; }
+.recommendation-card dl div { padding: 0.35rem 0; border-bottom: 1px solid var(--line); }
+.recommendation-card dt { color: var(--muted); font-size: 0.58rem; text-transform: uppercase; }
+.recommendation-card dd { color: var(--navy); font-family: var(--font-mono); font-size: 0.68rem; font-weight: 600; }
+.recommendation-note { margin-top: 0.65rem; color: var(--muted); font-size: 0.68rem; }
+
 /* Footer */
 .site-footer { margin-top: auto; padding-block: 1.4rem; background: #fff; border-top: 1px solid var(--line); }
 .footer-inner { width: min(1260px, calc(100% - 40px)); margin: auto; display: flex; justify-content: space-between; gap: 2rem; color: var(--muted); font-size: 0.7rem; }
@@ -380,6 +397,9 @@ code { padding: 0.12rem 0.3rem; background: var(--surface-alt); border: 1px soli
   .metric-grid, .result-facts, .math-summary { grid-template-columns: repeat(2, 1fr); }
   .records-split { grid-template-columns: 1fr; }.report-detail-grid { grid-template-columns: 1fr; }.run-facts { display: none; }
   .record-input-grid { grid-template-columns: 1fr; }
+  .recommendation-grid { grid-template-columns: 1fr; }
+  .recommendation-heading { align-items: flex-start; flex-direction: column; }
+  .recommendation-heading span { text-align: left; }
 }
 
 @media (max-width: 700px) {

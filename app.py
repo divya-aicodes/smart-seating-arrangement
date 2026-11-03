@@ -9,6 +9,7 @@ import json
 import math
 import os
 import secrets
+from collections import Counter
 from datetime import timedelta
 from urllib.parse import urlsplit
 # pyrefly: ignore [missing-import]
@@ -369,13 +370,88 @@ def parse_choice(field_name, default, allowed, label):
     return value
 
 
-def render_assignment_error(title, message, status_code, feasibility_report=None, details=None):
+def _accessible_seats_per_room(rows, benches, seats_per_bench, rule):
+    columns = benches * seats_per_bench
+    aisle_per_row = benches * (1 if seats_per_bench == 1 else 2)
+    if rule == "row_1":
+        return columns
+    if rule == "aisle":
+        return rows * aisle_per_row
+    if rule == "front_aisle_only":
+        return aisle_per_row
+    return columns + max(0, rows - 1) * aisle_per_row
+
+
+def recommend_room_layouts(students, diagonal=False, accessible_rule="row_1_and_aisle"):
+    """Return practical layouts satisfying capacity and necessary graph bounds."""
+    if not students:
+        return []
+
+    student_count = len(students)
+    largest_class = max(Counter(s.get("class", "Unknown") for s in students).values())
+    accessibility_count = sum(bool(s.get("special_needs")) for s in students)
+    recommendations = []
+
+    for seats_per_bench in (4, 3, 2):
+        candidates = []
+        for rooms in range(1, 11):
+            for rows in range(2, 13):
+                for benches in range(2, 7):
+                    columns = benches * seats_per_bench
+                    capacity = rooms * rows * columns
+                    if capacity < student_count:
+                        continue
+                    if diagonal:
+                        alpha = rooms * math.ceil(rows / 2) * math.ceil(columns / 2)
+                    else:
+                        alpha = rooms * math.ceil((rows * columns) / 2)
+                    accessible = rooms * _accessible_seats_per_room(
+                        rows, benches, seats_per_bench, accessible_rule
+                    )
+                    if alpha < largest_class or accessible < accessibility_count:
+                        continue
+                    score = (
+                        capacity - student_count,
+                        abs(rows - 5),
+                        abs(benches - 3),
+                        rooms,
+                    )
+                    candidates.append((score, rooms, rows, benches, capacity, alpha, accessible))
+
+        if candidates:
+            _, rooms, rows, benches, capacity, alpha, accessible = min(candidates)
+            recommendations.append({
+                "rooms": rooms,
+                "rows": rows,
+                "benches": benches,
+                "seats_per_bench": seats_per_bench,
+                "capacity": capacity,
+                "spare_seats": capacity - student_count,
+                "independence_bound": alpha,
+                "accessible_seats": accessible,
+                "student_count": student_count,
+                "largest_class": largest_class,
+                "accessibility_count": accessibility_count,
+                "adjacency": "orthogonal and diagonal" if diagonal else "orthogonal",
+            })
+    return recommendations
+
+
+def render_assignment_error(
+    title,
+    message,
+    status_code,
+    feasibility_report=None,
+    details=None,
+    recommendations=None,
+):
     return render_template(
         "results.html",
         error_occurred=True,
         error_title=title,
         error_message=message,
         error_details=details or [],
+        layout_recommendations=recommendations or [],
         feasibility_report=feasibility_report,
         flat_allocation_table=[],
     ), status_code
@@ -590,6 +666,7 @@ def assign():
             "adjacency_rule", "orthogonal", {"orthogonal", "diagonal"}, "adjacency rule"
         )
         diagonal = adjacency_rule == "diagonal"
+        accessible_rule = "row_1_and_aisle"
 
         persisted_exam = None
         database_student_ids = {}
@@ -662,6 +739,11 @@ def assign():
             
         # --- Step 1: Feasibility Pre-Check (Pigeonhole Principle) ---
         feasibility_report, G_seats = check_feasibility(students, room_configs, diagonal=diagonal)
+        layout_recommendations = recommend_room_layouts(
+            students,
+            diagonal=diagonal,
+            accessible_rule=accessible_rule,
+        )
         
         if feasibility_report["hard_violation_guaranteed"]:
             return render_assignment_error(
@@ -670,6 +752,7 @@ def assign():
                 422,
                 feasibility_report,
                 [item["message"] for item in feasibility_report["diagnostics"]],
+                layout_recommendations,
             )
             
         # --- Step 2: Forbidden-Positions Handling for Special-Needs ---
@@ -684,6 +767,7 @@ def assign():
                 str(ve),
                 422,
                 feasibility_report,
+                recommendations=layout_recommendations,
             )
             
         # --- Step 3: Conflict Graph Construction & Coloring (NetworkX) ---
@@ -709,6 +793,7 @@ def assign():
                 422,
                 feasibility_report,
                 [f"Unassigned student: {student_id}" for student_id in unassigned_ids[:25]],
+                layout_recommendations,
             )
         
         # --- Step 5: Explicit Propositional Logic Validation ---
@@ -726,6 +811,7 @@ def assign():
                 422,
                 feasibility_report,
                 [f"{item['id']}: {item['violation_count']} violation(s)" for item in failed],
+                layout_recommendations,
             )
         
         # Extract relaxed_constraints from validation_certificate for the UI
