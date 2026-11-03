@@ -5,6 +5,10 @@ and auditing examination seating plans. It combines a light, responsive web
 interface with database-backed institutional or reproducible synthetic data,
 constraint-aware seat allocation, persisted reports, and export workflows.
 
+**Live application:** [smart-seating-arrangement-tan.vercel.app](https://smart-seating-arrangement-tan.vercel.app/)
+
+**Source:** [github.com/divya-aicodes/smart-seating-arrangement](https://github.com/divya-aicodes/smart-seating-arrangement)
+
 ## What the application does
 
 - Imports real student and examination records or generates seeded synthetic data.
