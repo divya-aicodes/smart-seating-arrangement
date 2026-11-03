@@ -142,7 +142,7 @@ def generate_synthetic():
                 "benches_per_row", 3, 1, 15, "Benches per row"
             ),
             seats_per_bench=_bounded_int(
-                "seats_per_bench", 2, 1, 2, "Seats per bench"
+                "seats_per_bench", 2, 1, 4, "Seats per bench"
             ),
             exam_date=_form_date("exam_date", "Exam date"),
         )
@@ -175,7 +175,7 @@ def create_room():
             floor=request.form.get("floor", ""),
             rows=_bounded_int("rows", 4, 1, 20, "Rows"),
             benches_per_row=_bounded_int("benches_per_row", 3, 1, 15, "Benches per row"),
-            seats_per_bench=_bounded_int("seats_per_bench", 2, 1, 2, "Seats per bench"),
+            seats_per_bench=_bounded_int("seats_per_bench", 2, 1, 4, "Seats per bench"),
             accessible_rule=accessible_rule,
         )
         flash(

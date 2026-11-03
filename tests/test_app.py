@@ -122,7 +122,7 @@ class TestFlaskIntegration(unittest.TestCase):
                 "room_count": "1",
                 "rows_per_room": "2",
                 "benches_per_row": "3",
-                "seats_per_bench": "2",
+                "seats_per_bench": "4",
                 "exam_date": "2026-12-02",
             },
         )
@@ -133,6 +133,7 @@ class TestFlaskIntegration(unittest.TestCase):
         self.assertEqual(dataset.source_type, "synthetic")
         self.assertEqual(dataset.generation_seed, 99)
         self.assertEqual(Student.query.count(), 6)
+        self.assertEqual(room.seats_per_bench, 4)
 
         index_res = self.client.get("/")
         self.assertEqual(index_res.status_code, 200)
@@ -251,6 +252,33 @@ class TestFlaskIntegration(unittest.TestCase):
         self.assertIn(b"Handshaking Lemma", res.data)
         self.assertIn(b"Chromatic Polynomial", res.data)
         self.assertIn(b"Principle of Inclusion-Exclusion", res.data)
+
+    def test_manual_planner_accepts_three_and_four_seat_shared_benches(self):
+        for seats_per_bench in (3, 4):
+            with self.subTest(seats_per_bench=seats_per_bench):
+                students = "\n".join(
+                    f"S{index},Class{index},Subject{index},N"
+                    for index in range(1, seats_per_bench + 1)
+                )
+                response = self.client.post(
+                    "/assign",
+                    data={
+                        "data_mode": "manual",
+                        "num_rooms": "1",
+                        "rows": "1",
+                        "cols": "1",
+                        "seats_per_bench": str(seats_per_bench),
+                        "accessible_rule": "row_1_and_aisle",
+                        "invigilator_ratio": "20",
+                        "adjacency_rule": "orthogonal",
+                        "student_data_text": (
+                            "ID,Class,Subject,Special_Needs\n" + students
+                        ),
+                    },
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertIn(b"Seating plan complete", response.data)
+                self.assertIn(f"Seat {seats_per_bench}".encode(), response.data)
 
     def test_assign_route_pigeonhole_dense(self):
         # 10 students of same class in a 12-seat room (alpha=6) -> triggers PHP alert

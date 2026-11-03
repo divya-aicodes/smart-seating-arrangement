@@ -123,7 +123,7 @@
                         <div class="field-group"><label for="synthetic_rooms">Rooms</label><input id="synthetic_rooms" type="number" name="room_count" class="field-control" min="1" max="20" value="3" required></div>
                         <div class="field-group"><label for="synthetic_rows">Rows per room</label><input id="synthetic_rows" type="number" name="rows_per_room" class="field-control" min="1" max="20" value="5" required></div>
                         <div class="field-group"><label for="synthetic_benches">Benches per row</label><input id="synthetic_benches" type="number" name="benches_per_row" class="field-control" min="1" max="15" value="3" required></div>
-                        <div class="field-group"><label for="synthetic_seats">Seats per bench</label><select id="synthetic_seats" name="seats_per_bench" class="field-control"><option value="1">1</option><option value="2" selected>2</option></select></div>
+                        <div class="field-group"><label for="synthetic_seats">Seats per bench</label><select id="synthetic_seats" name="seats_per_bench" class="field-control"><option value="1">1 · Single desk</option><option value="2" selected>2 · Shared bench</option><option value="3">3 · Shared bench</option><option value="4">4 · Shared bench</option></select></div>
                     </div>
                     <div class="form-footer">
                         <p>Generated records remain labelled synthetic and retain their seed.</p>
@@ -155,7 +155,7 @@
                         <div class="field-group"><label for="room_floor">Floor</label><input id="room_floor" name="floor" class="field-control" placeholder="1"></div>
                         <div class="field-group"><label for="room_rows">Rows</label><input id="room_rows" type="number" name="rows" class="field-control" min="1" max="20" value="5" required></div>
                         <div class="field-group"><label for="room_benches">Benches per row</label><input id="room_benches" type="number" name="benches_per_row" class="field-control" min="1" max="15" value="3" required></div>
-                        <div class="field-group"><label for="room_seats">Seats per bench</label><select id="room_seats" name="seats_per_bench" class="field-control"><option value="1">1</option><option value="2" selected>2</option></select></div>
+                        <div class="field-group"><label for="room_seats">Seats per bench</label><select id="room_seats" name="seats_per_bench" class="field-control"><option value="1">1 · Single desk</option><option value="2" selected>2 · Shared bench</option><option value="3">3 · Shared bench</option><option value="4">4 · Shared bench</option></select></div>
                         <div class="field-group"><label for="room_accessible">Accessible seats</label><select id="room_accessible" name="accessible_rule" class="field-control"><option value="row_1_and_aisle">Front row and aisles</option><option value="row_1">Front row</option><option value="aisle">Aisles</option><option value="front_aisle_only">Front aisle corners</option></select></div>
                     </div>
                     <div class="form-footer">

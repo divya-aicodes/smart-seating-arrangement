@@ -607,7 +607,7 @@ def assign():
             rows = parse_bounded_int("rows", 4, 1, 20, "Rows per room")
             cols = parse_bounded_int("cols", 3, 1, 15, "Benches per row")
             seats_per_bench = parse_bounded_int(
-                "seats_per_bench", 2, 1, 2, "Seats per bench"
+                "seats_per_bench", 2, 1, 4, "Seats per bench"
             )
             accessible_rule = parse_choice(
                 "accessible_rule",
