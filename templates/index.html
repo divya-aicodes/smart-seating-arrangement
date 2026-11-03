@@ -24,9 +24,9 @@
             <span class="status-dot"><i></i> Ready</span>
         </div>
         <ol class="process-list">
-            <li><span>01</span><div><strong>Select records</strong><small>Stored dataset or one-time CSV</small></div></li>
-            <li><span>02</span><div><strong>Define constraints</strong><small>Rooms, adjacency and accessibility</small></div></li>
-            <li><span>03</span><div><strong>Generate and verify</strong><small>Seat map, validation and exports</small></div></li>
+            <li><span>01</span><div><strong>Choose the source</strong><small>Stored dataset or one-time CSV</small></div></li>
+            <li><span>02</span><div><strong>Add student records</strong><small>Upload and review the candidate CSV</small></div></li>
+            <li><span>03</span><div><strong>Choose a room setup</strong><small>Apply a calculated layout in one click</small></div></li>
         </ol>
     </aside>
 </section>
@@ -104,19 +104,72 @@
     </section>
 
     <div id="manual-source-fields">
-        <section class="workflow-section reveal" aria-labelledby="layout-heading">
+        <section class="workflow-section reveal" aria-labelledby="records-heading">
             <div class="workflow-number" aria-hidden="true">02</div>
             <div class="workflow-content">
                 <header class="section-heading">
                     <div>
-                        <p class="section-kicker">Layout</p>
-                        <h2 id="layout-heading">Describe the physical room setup</h2>
-                        <p>These values generate the seat graph used by the adjacency checks.</p>
+                        <p class="section-kicker">Candidates</p>
+                        <h2 id="records-heading">Add student records</h2>
+                        <p>Upload or paste the CSV first. The next step will calculate room choices from these records.</p>
                     </div>
-                    <span class="section-note">One-time CSV only</span>
+                    <a class="text-link" href="{{ url_for('sample_csv') }}">Download empty template <span aria-hidden="true">↓</span></a>
                 </header>
 
-                <div class="field-grid field-grid-four">
+                <div class="record-input-grid">
+                    <div class="upload-panel">
+                        <div class="input-method-label"><span>A</span> Upload a CSV file</div>
+                        <label class="file-drop" for="csv_file" data-file-control>
+                            <input id="csv_file" name="csv_file" type="file" accept=".csv,text/csv" aria-describedby="csv_file_status" data-file-input>
+                            <span class="file-drop-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+                            </span>
+                            <strong data-file-action>Choose a student CSV</strong>
+                            <small id="csv_file_status" data-file-name aria-live="polite">No file selected</small>
+                        </label>
+                        <p class="schema-note"><strong>Accepted columns</strong> ID, Name, Class, Department, Subject_Code, Subject, Special_Needs</p>
+                    </div>
+
+                    <div class="paste-panel">
+                        <div class="input-method-label"><span>B</span> Paste CSV text</div>
+                        <label class="sr-only" for="student_data_text">Student CSV text</label>
+                        <textarea id="student_data_text" name="student_data_text" class="field-control code-input" rows="10" placeholder="ID,Class,Subject,Special_Needs&#10;STU001,CSE-A,Discrete Mathematics,N"></textarea>
+                        <small class="field-help">Keep the header row. Leave this blank when uploading a file.</small>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="workflow-section reveal" aria-labelledby="layout-heading">
+            <div class="workflow-number" aria-hidden="true">03</div>
+            <div class="workflow-content">
+                <header class="section-heading">
+                    <div>
+                        <p class="section-kicker">Physical setup</p>
+                        <h2 id="layout-heading">Describe the physical room setup</h2>
+                        <p>Choose a calculated option, then confirm that it matches the rooms and benches physically available.</p>
+                    </div>
+                    <span class="section-note">Calculated from Step 2</span>
+                </header>
+
+                <div class="recommendation-workspace" data-layout-recommendations data-endpoint="{{ url_for('layout_recommendations') }}" aria-live="polite">
+                    <div class="recommendation-empty" data-recommendation-empty>
+                        <span class="recommendation-empty-number">01</span>
+                        <div><strong>Add student records to see room options</strong><p>After a valid CSV is selected or pasted, this area will show one-click setups based on student count, class distribution and accessibility requests.</p></div>
+                    </div>
+                    <div class="recommendation-loading" data-recommendation-loading hidden>
+                        <span class="recommendation-spinner" aria-hidden="true"></span>
+                        <div><strong>Calculating room options</strong><p>Checking capacity, class-separation bounds and accessible positions.</p></div>
+                    </div>
+                    <div class="recommendation-error" data-recommendation-error hidden></div>
+                    <div class="recommendation-results" data-recommendation-results hidden>
+                        <div class="recommendation-summary" data-recommendation-summary></div>
+                        <div class="recommendation-choice-grid" data-recommendation-list></div>
+                        <p class="recommendation-caution">Recommendations are necessary-condition checks, not a promise that an unavailable room exists. Choose only a setup your institution can physically provide; final validation still runs before publishing the plan.</p>
+                    </div>
+                </div>
+
+                <div class="field-grid field-grid-four layout-entry-fields">
                     <div class="field-group">
                         <label for="num_rooms">Examination rooms</label>
                         <input id="num_rooms" name="num_rooms" class="field-control" type="number" value="1" min="1" max="10" required>
@@ -168,42 +221,6 @@
                 </div>
 
                 <div id="capacity-preview" class="capacity-strip" aria-live="polite"></div>
-            </div>
-        </section>
-
-        <section class="workflow-section reveal" aria-labelledby="records-heading">
-            <div class="workflow-number" aria-hidden="true">03</div>
-            <div class="workflow-content">
-                <header class="section-heading">
-                    <div>
-                        <p class="section-kicker">Candidates</p>
-                        <h2 id="records-heading">Add student records</h2>
-                        <p>Choose one input method. Manual records are used for this run only.</p>
-                    </div>
-                    <a class="text-link" href="{{ url_for('sample_csv') }}">Download empty template <span aria-hidden="true">↓</span></a>
-                </header>
-
-                <div class="record-input-grid">
-                    <div class="upload-panel">
-                        <div class="input-method-label"><span>A</span> Upload a CSV file</div>
-                        <label class="file-drop" for="csv_file" data-file-control>
-                            <input id="csv_file" name="csv_file" type="file" accept=".csv,text/csv" aria-describedby="csv_file_status" data-file-input>
-                            <span class="file-drop-icon" aria-hidden="true">
-                                <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
-                            </span>
-                            <strong data-file-action>Choose a student CSV</strong>
-                            <small id="csv_file_status" data-file-name aria-live="polite">No file selected</small>
-                        </label>
-                        <p class="schema-note"><strong>Accepted columns</strong> ID, Name, Class, Department, Subject_Code, Subject, Special_Needs</p>
-                    </div>
-
-                    <div class="paste-panel">
-                        <div class="input-method-label"><span>B</span> Paste CSV text</div>
-                        <label class="sr-only" for="student_data_text">Student CSV text</label>
-                        <textarea id="student_data_text" name="student_data_text" class="field-control code-input" rows="10" placeholder="ID,Class,Subject,Special_Needs&#10;STU001,CSE-A,Discrete Mathematics,N"></textarea>
-                        <small class="field-help">Keep the header row. Leave this blank when uploading a file.</small>
-                    </div>
-                </div>
             </div>
         </section>
     </div>

@@ -443,7 +443,6 @@ def render_assignment_error(
     status_code,
     feasibility_report=None,
     details=None,
-    recommendations=None,
 ):
     return render_template(
         "results.html",
@@ -451,7 +450,6 @@ def render_assignment_error(
         error_title=title,
         error_message=message,
         error_details=details or [],
-        layout_recommendations=recommendations or [],
         feasibility_report=feasibility_report,
         flat_allocation_table=[],
     ), status_code
@@ -539,6 +537,56 @@ def sample_csv():
         mimetype="text/csv",
         headers={"Content-Disposition": "attachment;filename=student_import_template.csv"}
     )
+
+
+@app.route("/api/layout-recommendations", methods=["POST"])
+def layout_recommendations():
+    """Validate temporary CSV data and return feasible room-layout choices."""
+    try:
+        adjacency_rule = parse_choice(
+            "adjacency_rule",
+            "orthogonal",
+            {"orthogonal", "diagonal"},
+            "adjacency rule",
+        )
+        accessible_rule = parse_choice(
+            "accessible_rule",
+            "row_1_and_aisle",
+            {"row_1", "aisle", "row_1_and_aisle", "front_aisle_only"},
+            "accessible-seat rule",
+        )
+        csv_file = request.files.get("csv_file")
+        manual_text = request.form.get("student_data_text", "").strip()
+        if csv_file and csv_file.filename:
+            students = parse_csv_students(csv_file)
+        elif manual_text:
+            students = parse_csv_students(manual_text)
+        else:
+            raise ValueError("Upload a student CSV or paste CSV data to calculate layouts.")
+
+        recommendations = recommend_room_layouts(
+            students,
+            diagonal=adjacency_rule == "diagonal",
+            accessible_rule=accessible_rule,
+        )
+        if not recommendations:
+            raise ValueError(
+                "No layout within the supported room limits satisfies these records and rules."
+            )
+
+        return jsonify({
+            "student_count": len(students),
+            "largest_class": max(Counter(s["class"] for s in students).values()),
+            "accessibility_count": sum(bool(s["special_needs"]) for s in students),
+            "recommendations": recommendations,
+        })
+    except ValueError as error:
+        return jsonify({
+            "error": {
+                "code": "invalid_student_data",
+                "message": str(error),
+            }
+        }), 400
 
 
 def load_database_assignment_inputs():
@@ -739,12 +787,6 @@ def assign():
             
         # --- Step 1: Feasibility Pre-Check (Pigeonhole Principle) ---
         feasibility_report, G_seats = check_feasibility(students, room_configs, diagonal=diagonal)
-        layout_recommendations = recommend_room_layouts(
-            students,
-            diagonal=diagonal,
-            accessible_rule=accessible_rule,
-        )
-        
         if feasibility_report["hard_violation_guaranteed"]:
             return render_assignment_error(
                 "Infeasible Seating Configuration",
@@ -752,7 +794,6 @@ def assign():
                 422,
                 feasibility_report,
                 [item["message"] for item in feasibility_report["diagnostics"]],
-                layout_recommendations,
             )
             
         # --- Step 2: Forbidden-Positions Handling for Special-Needs ---
@@ -767,7 +808,6 @@ def assign():
                 str(ve),
                 422,
                 feasibility_report,
-                recommendations=layout_recommendations,
             )
             
         # --- Step 3: Conflict Graph Construction & Coloring (NetworkX) ---
@@ -793,7 +833,6 @@ def assign():
                 422,
                 feasibility_report,
                 [f"Unassigned student: {student_id}" for student_id in unassigned_ids[:25]],
-                layout_recommendations,
             )
         
         # --- Step 5: Explicit Propositional Logic Validation ---
@@ -811,7 +850,6 @@ def assign():
                 422,
                 feasibility_report,
                 [f"{item['id']}: {item['violation_count']} violation(s)" for item in failed],
-                layout_recommendations,
             )
         
         # Extract relaxed_constraints from validation_certificate for the UI

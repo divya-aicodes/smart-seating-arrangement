@@ -205,6 +205,28 @@ code { padding: 0.12rem 0.3rem; background: var(--surface-alt); border: 1px soli
 .schema-note { margin-top: 0.65rem; color: var(--muted); font-size: 0.68rem; line-height: 1.5; }
 .schema-note strong { color: var(--ink-soft); }
 .code-input { min-height: 175px; resize: vertical; font-family: var(--font-mono); font-size: 0.75rem; line-height: 1.55; }
+.recommendation-workspace { margin-bottom: 1.25rem; padding: 1rem; background: #f7f9f8; border: 1px solid var(--line); }
+.recommendation-empty, .recommendation-loading { min-height: 88px; display: flex; align-items: center; gap: 0.9rem; }
+.recommendation-empty-number { width: 42px; height: 42px; display: grid; place-items: center; flex: 0 0 42px; border: 1px solid var(--line-strong); color: var(--orange); font-family: var(--font-mono); font-size: 0.72rem; }
+.recommendation-empty strong, .recommendation-loading strong { color: var(--navy); font-size: 0.88rem; }
+.recommendation-empty p, .recommendation-loading p { max-width: 760px; margin-top: 0.22rem; color: var(--muted); font-size: 0.74rem; }
+.recommendation-spinner { width: 30px; height: 30px; flex: 0 0 30px; border: 2px solid var(--line); border-top-color: var(--blue); border-radius: 50%; animation: recommendation-spin 650ms linear infinite; }
+.recommendation-error { padding: 0.8rem; background: var(--red-soft); border-left: 3px solid var(--red); color: var(--red); font-size: 0.76rem; }
+.recommendation-summary { margin-bottom: 0.75rem; display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.recommendation-summary strong { color: var(--navy); font-family: var(--font-display); font-size: 1.35rem; }
+.recommendation-summary span { color: var(--muted); font-size: 0.7rem; }
+.recommendation-choice-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.7rem; }
+.layout-choice-card { padding: 0.9rem; display: flex; flex-direction: column; background: #fff; border: 1px solid var(--line); border-top: 3px solid var(--blue); transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease; }
+.layout-choice-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+.layout-choice-card.is-selected { border-color: var(--green); border-top-color: var(--green); box-shadow: inset 0 0 0 1px var(--green); }
+.layout-choice-label { color: var(--orange); font-family: var(--font-mono); font-size: 0.6rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.layout-choice-card h3 { margin-top: 0.35rem; color: var(--navy); font-size: 1.05rem; line-height: 1.15; }
+.layout-choice-formula { margin-top: 0.58rem; padding: 0.45rem; background: var(--surface-alt); color: var(--navy); font-family: var(--font-mono); font-size: 0.64rem; }
+.layout-choice-explanation { margin: 0.62rem 0 0.8rem; color: var(--muted); font-size: 0.69rem; line-height: 1.5; }
+.layout-choice-button { width: 100%; margin-top: auto; }
+.layout-choice-card.is-selected .layout-choice-button { background: var(--green); border-color: var(--green); color: #fff; }
+.recommendation-caution { margin-top: 0.7rem; color: var(--muted); font-size: 0.66rem; line-height: 1.45; }
+.layout-entry-fields { padding-top: 0.25rem; }
 .empty-inline { padding: 1rem; display: grid; grid-template-columns: 38px 1fr auto; align-items: center; gap: 0.85rem; background: var(--amber-soft); border: 1px solid #e2c98e; }
 .empty-inline-mark { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid var(--amber); color: var(--amber); font-family: var(--font-display); font-size: 1.35rem; font-weight: 700; }
 .empty-inline strong { color: #664815; }.empty-inline p { margin-top: 0.2rem; color: #80652f; font-size: 0.76rem; }
@@ -355,23 +377,6 @@ code { padding: 0.12rem 0.3rem; background: var(--surface-alt); border: 1px soli
 /* Error page */
 .error-page { max-width: 760px; padding-block: 7rem; text-align: center; }.error-code { width: 64px; height: 64px; margin: 0 auto 1rem; display: grid; place-items: center; border: 2px solid var(--red); color: var(--red); font-family: var(--font-display); font-size: 2rem; font-weight: 700; }.error-page .eyebrow span { justify-content: center; }.error-page h1 { font-size: clamp(2.8rem, 6vw, 4.6rem); }.error-message { max-width: 620px; margin: 1rem auto 0; color: var(--ink-soft); font-size: 1rem; }.error-detail-list { margin-top: 1.5rem; padding: 1rem; background: #fff; border: 1px solid var(--line); text-align: left; }.error-detail-list strong { color: var(--navy); }.error-detail-list ul { margin: 0.6rem 0 0 1.2rem; color: var(--ink-soft); font-size: 0.78rem; }.error-detail-list li + li { margin-top: 0.3rem; }.error-actions { margin-top: 1.5rem; }
 
-.layout-recommendations { margin-top: 1.2rem; text-align: left; }
-.error-page.has-recommendations { max-width: 1180px; }
-.recommendation-heading { margin-bottom: 0.7rem; display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; }
-.recommendation-heading strong { color: var(--navy); font-family: var(--font-display); font-size: 1.35rem; }
-.recommendation-heading span { max-width: 610px; color: var(--muted); font-size: 0.72rem; text-align: right; }
-.recommendation-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.65rem; }
-.recommendation-card { padding: 0.85rem; background: #fff; border: 1px solid var(--line); border-top: 3px solid var(--blue); box-shadow: var(--shadow); }
-.recommendation-label { color: var(--orange); font-family: var(--font-mono); font-size: 0.62rem; font-weight: 600; text-transform: uppercase; }
-.recommendation-card h2 { margin-top: 0.28rem; font-size: 1.15rem; }
-.recommendation-formula { margin-top: 0.55rem; padding: 0.48rem; background: var(--surface-alt); color: var(--ink-soft); font-family: var(--font-mono); font-size: 0.65rem; }
-.recommendation-formula strong { color: var(--green); }
-.recommendation-card dl { margin-top: 0.5rem; display: grid; grid-template-columns: 1fr 1fr; }
-.recommendation-card dl div { padding: 0.35rem 0; border-bottom: 1px solid var(--line); }
-.recommendation-card dt { color: var(--muted); font-size: 0.58rem; text-transform: uppercase; }
-.recommendation-card dd { color: var(--navy); font-family: var(--font-mono); font-size: 0.68rem; font-weight: 600; }
-.recommendation-note { margin-top: 0.65rem; color: var(--muted); font-size: 0.68rem; }
-
 /* Footer */
 .site-footer { margin-top: auto; padding-block: 1.4rem; background: #fff; border-top: 1px solid var(--line); }
 .footer-inner { width: min(1260px, calc(100% - 40px)); margin: auto; display: flex; justify-content: space-between; gap: 2rem; color: var(--muted); font-size: 0.7rem; }
@@ -384,6 +389,7 @@ code { padding: 0.12rem 0.3rem; background: var(--surface-alt); border: 1px soli
 @keyframes reveal-in { to { opacity: 1; transform: translateY(0); } }
 @keyframes detail-open { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes status-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(37,113,83,.25); } 50% { box-shadow: 0 0 0 5px rgba(37,113,83,0); } }
+@keyframes recommendation-spin { to { transform: rotate(360deg); } }
 
 /* Responsive */
 @media (max-width: 980px) {
@@ -397,9 +403,8 @@ code { padding: 0.12rem 0.3rem; background: var(--surface-alt); border: 1px soli
   .metric-grid, .result-facts, .math-summary { grid-template-columns: repeat(2, 1fr); }
   .records-split { grid-template-columns: 1fr; }.report-detail-grid { grid-template-columns: 1fr; }.run-facts { display: none; }
   .record-input-grid { grid-template-columns: 1fr; }
-  .recommendation-grid { grid-template-columns: 1fr; }
-  .recommendation-heading { align-items: flex-start; flex-direction: column; }
-  .recommendation-heading span { text-align: left; }
+  .recommendation-choice-grid { grid-template-columns: 1fr; }
+  .recommendation-summary { align-items: flex-start; flex-direction: column; gap: 0.2rem; }
 }
 
 @media (max-width: 700px) {

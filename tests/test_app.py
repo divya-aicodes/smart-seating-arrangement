@@ -39,6 +39,11 @@ class TestFlaskIntegration(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Create a defensible seating plan", response.data)
         self.assertIn(b"Pigeonhole Principle", response.data)
+        self.assertLess(
+            response.data.index(b"Add student records"),
+            response.data.index(b"Describe the physical room setup"),
+        )
+        self.assertIn(b"data-layout-recommendations", response.data)
 
     def test_sample_csv_downloads(self):
         for preset in ["balanced", "pigeonhole", "multiroom"]:
@@ -295,8 +300,60 @@ class TestFlaskIntegration(unittest.TestCase):
         self.assertEqual(res.status_code, 422)
         self.assertIn(b"Pigeonhole", res.data)
         self.assertIn(b"No seating plan was generated", res.data)
-        self.assertIn(b"Recommended layouts for this CSV", res.data)
-        self.assertIn(b"Independent bound", res.data)
+        self.assertNotIn(b"Recommended layouts for this CSV", res.data)
+
+    def test_layout_recommendation_api_returns_one_click_field_values(self):
+        students = []
+        for class_name, count in {
+            "Electronics": 36,
+            "Computer Science": 32,
+            "Mechanical": 27,
+            "Civil": 25,
+        }.items():
+            students.extend(
+                f"{class_name}-{index},{class_name},Mathematics,N"
+                for index in range(count)
+            )
+        csv_text = "ID,Class,Subject,Special_Needs\n" + "\n".join(students)
+
+        response = self.client.post(
+            "/api/layout-recommendations",
+            data={
+                "student_data_text": csv_text,
+                "adjacency_rule": "orthogonal",
+                "accessible_rule": "row_1_and_aisle",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertEqual(payload["student_count"], 120)
+        self.assertEqual(payload["largest_class"], 36)
+        self.assertEqual(
+            payload["recommendations"][0],
+            {
+                "rooms": 2,
+                "rows": 5,
+                "benches": 3,
+                "seats_per_bench": 4,
+                "capacity": 120,
+                "spare_seats": 0,
+                "independence_bound": 60,
+                "accessible_seats": 72,
+                "student_count": 120,
+                "largest_class": 36,
+                "accessibility_count": 0,
+                "adjacency": "orthogonal",
+            },
+        )
+
+    def test_layout_recommendation_api_rejects_invalid_csv(self):
+        response = self.client.post(
+            "/api/layout-recommendations",
+            data={"student_data_text": "Name,Subject\nAsha,Math\n"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["error"]["code"], "invalid_student_data")
 
     def test_layout_recommendations_follow_csv_distribution(self):
         students = []
@@ -441,6 +498,14 @@ class TestPublicAccessSecurity(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn(b"Security Token Invalid", response.data)
+
+    def test_layout_recommendation_post_requires_csrf_token(self):
+        response = self.client.post(
+            "/api/layout-recommendations",
+            data={"student_data_text": "ID,Class\nS1,A\n"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["error"]["code"], "csrf_failed")
 
     def test_public_pages_are_not_cached(self):
         page = self.client.get("/")

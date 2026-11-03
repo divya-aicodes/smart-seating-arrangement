@@ -14,7 +14,7 @@
 
 {% block content %}
 {% if error_occurred %}
-<section class="error-page page-shell reveal {{ 'has-recommendations' if layout_recommendations else '' }}">
+<section class="error-page page-shell reveal">
     <div class="error-code" aria-hidden="true">!</div>
     <p class="eyebrow"><span>Run stopped safely</span></p>
     <h1>{{ error_title }}</h1>
@@ -25,33 +25,7 @@
         <ul>{% for detail in error_details %}<li>{{ detail }}</li>{% endfor %}</ul>
     </div>
     {% endif %}
-    {% if layout_recommendations %}
-    <div class="layout-recommendations">
-        <div class="recommendation-heading">
-            <strong>Recommended layouts for this CSV</strong>
-            <span>Calculated from student count, largest class, accessibility requests and {{ layout_recommendations[0].adjacency }} adjacency.</span>
-        </div>
-        <div class="recommendation-grid">
-            {% for item in layout_recommendations %}
-            <article class="recommendation-card">
-                <span class="recommendation-label">{{ item.seats_per_bench }}-seat shared benches</span>
-                <h2>{{ item.rooms }} room{{ '' if item.rooms == 1 else 's' }} × {{ item.rows }} rows × {{ item.benches }} benches</h2>
-                <div class="recommendation-formula">{{ item.rooms }} × {{ item.rows }} × {{ item.benches }} × {{ item.seats_per_bench }} = <strong>{{ item.capacity }} seats</strong></div>
-                <dl>
-                    <div><dt>CSV students</dt><dd>{{ item.student_count }}</dd></div>
-                    <div><dt>Spare seats</dt><dd>{{ item.spare_seats }}</dd></div>
-                    <div><dt>Largest class</dt><dd>{{ item.largest_class }}</dd></div>
-                    <div><dt>Independent bound</dt><dd>α(G) = {{ item.independence_bound }}</dd></div>
-                    <div><dt>Access requests</dt><dd>{{ item.accessibility_count }}</dd></div>
-                    <div><dt>Accessible seats</dt><dd>{{ item.accessible_seats }}</dd></div>
-                </dl>
-            </article>
-            {% endfor %}
-        </div>
-        <p class="recommendation-note">Use a recommendation only when it matches the physical rooms available. These layouts satisfy necessary capacity and graph bounds; the final solver still validates every seat.</p>
-    </div>
-    {% endif %}
-    <div class="error-actions"><a class="button button-primary" href="{{ url_for('index') }}">Return to seating setup</a></div>
+    <div class="error-actions"><a class="button button-primary" href="{{ url_for('index') }}">Return to setup and choose another option</a></div>
 </section>
 {% else %}
 <div class="result-toolbar page-shell no-print reveal">

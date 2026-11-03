@@ -125,23 +125,23 @@ constraint rejection and a complete post-allocation validation pass.
           |
 2. Create an exam, registrations, rooms, and seats
           |
-3. Select database mode or provide manual CSV data
+3. Select connected records or one-time CSV mode
           |
-4. Build the seat-adjacency graph
+4. Upload, preview, and validate the student CSV
           |
-5. Reject provably infeasible hard-constraint inputs
+5. Calculate room-layout options from the CSV distribution
           |
-6. Place accessibility-constrained students
+6. Apply a recommended setup or enter the physical setup manually
           |
-7. Build and analyse the student conflict graph
+7. Build the seat-adjacency graph and reject provably infeasible inputs
           |
-8. Greedily map remaining students without class conflicts
+8. Place accessibility-constrained students
           |
-9. Validate every hard and soft predicate
+9. Build the student conflict graph and map remaining students
           |
-10. Persist eligible database-backed runs and allocations
+10. Validate every hard and soft predicate
           |
-11. Review seat maps, mathematics, reports, and exports
+11. Persist eligible runs, then review maps, mathematics, and exports
 ```
 
 Database mode connects the complete workflow to persisted records. Manual mode
@@ -537,8 +537,14 @@ Their `source_type` and dataset lineage remain explicit.
 ### Manual planning data
 
 Manual mode accepts the same student fields from an uploaded or pasted CSV and
-constructs room geometry from the form. It records an audit event but does not
-create a database `SeatingRun` or persistent allocations.
+constructs room geometry from the form. Before generation, the planner sends the
+CSV to a CSRF- and origin-protected same-origin endpoint. The backend validates
+the records and returns up to three one-click layout choices based on capacity,
+largest-class independent-set bounds, accessibility requests, and the selected
+adjacency rule. Choosing a card fills room count, rows, benches per row, and
+seats per bench; users remain responsible for choosing geometry that physically
+exists. Manual runs record an audit event but do not create a database
+`SeatingRun` or persistent allocations.
 
 ### Persisted planning data
 
@@ -641,7 +647,8 @@ AuditLog records relevant actions across these resources.
 | Method | Route | Purpose |
 | --- | --- | --- |
 | `GET` | `/` | Plan a seating run from persisted or manual data |
-| `POST` | `/assign` | Execute the seven-stage planning workflow |
+| `POST` | `/api/layout-recommendations` | Validate temporary CSV data and calculate one-click room setups |
+| `POST` | `/assign` | Execute the six-stage mathematical planning workflow |
 | `GET` | `/sample-csv` | Download a header-only student import template |
 | `POST` | `/export-csv` | Export the current flat allocation table |
 | `GET` | `/data` | Manage datasets, imports, synthetic data, and rooms |

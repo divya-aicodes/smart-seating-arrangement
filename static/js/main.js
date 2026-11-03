@@ -6,6 +6,7 @@ document.addEventListener("DOMContentLoaded", () => {
     initDatasetRoomFilter();
     initCapacityPreview();
     initFileInputs();
+    initLayoutRecommendations();
     initTableSearch();
     initSeatLabelToggle();
     initSubmitState();
@@ -147,6 +148,149 @@ function createCapacityItem(text, strong = false) {
     const element = document.createElement(strong ? "strong" : "span");
     element.textContent = text;
     return element;
+}
+
+function initLayoutRecommendations() {
+    const workspace = document.querySelector("[data-layout-recommendations]");
+    const csvInput = document.getElementById("csv_file");
+    const textInput = document.getElementById("student_data_text");
+    const accessibility = document.getElementById("accessible_rule");
+    const adjacencyInputs = Array.from(document.querySelectorAll("input[name='adjacency_rule']"));
+    if (!workspace || !csvInput || !textInput || !accessibility || !adjacencyInputs.length) return;
+
+    const empty = workspace.querySelector("[data-recommendation-empty]");
+    const loading = workspace.querySelector("[data-recommendation-loading]");
+    const errorPanel = workspace.querySelector("[data-recommendation-error]");
+    const results = workspace.querySelector("[data-recommendation-results]");
+    const summary = workspace.querySelector("[data-recommendation-summary]");
+    const list = workspace.querySelector("[data-recommendation-list]");
+    const csrfToken = document.querySelector("input[name='csrf_token']")?.value || "";
+    let debounceTimer;
+    let activeRequest;
+
+    const show = target => {
+        [empty, loading, errorPanel, results].forEach(panel => {
+            if (panel) panel.hidden = panel !== target;
+        });
+    };
+
+    const hasRecords = () => Boolean(csvInput.files?.[0] || textInput.value.trim());
+
+    const calculate = async () => {
+        window.clearTimeout(debounceTimer);
+        if (!hasRecords()) {
+            activeRequest?.abort();
+            list.replaceChildren();
+            show(empty);
+            return;
+        }
+
+        activeRequest?.abort();
+        activeRequest = new AbortController();
+        show(loading);
+
+        const formData = new FormData();
+        const file = csvInput.files?.[0];
+        if (file) formData.append("csv_file", file);
+        else formData.append("student_data_text", textInput.value);
+        formData.append("csrf_token", csrfToken);
+        formData.append("accessible_rule", accessibility.value);
+        formData.append(
+            "adjacency_rule",
+            adjacencyInputs.find(input => input.checked)?.value || "orthogonal"
+        );
+
+        try {
+            const response = await fetch(workspace.dataset.endpoint, {
+                method: "POST",
+                body: formData,
+                credentials: "same-origin",
+                headers: { "X-CSRF-Token": csrfToken },
+                signal: activeRequest.signal
+            });
+            const payload = await response.json();
+            if (!response.ok) throw new Error(payload.error?.message || "Room options could not be calculated.");
+            renderLayoutRecommendations(payload, summary, list);
+            show(results);
+        } catch (error) {
+            if (error.name === "AbortError") return;
+            errorPanel.textContent = error.message || "Room options could not be calculated.";
+            show(errorPanel);
+        }
+    };
+
+    const schedule = () => {
+        window.clearTimeout(debounceTimer);
+        debounceTimer = window.setTimeout(calculate, 350);
+    };
+
+    csvInput.addEventListener("change", calculate);
+    textInput.addEventListener("input", schedule);
+    accessibility.addEventListener("change", calculate);
+    adjacencyInputs.forEach(input => input.addEventListener("change", calculate));
+}
+
+function renderLayoutRecommendations(payload, summary, list) {
+    summary.replaceChildren();
+    const heading = document.createElement("strong");
+    heading.textContent = `${payload.student_count} students analysed`;
+    const detail = document.createElement("span");
+    detail.textContent = `Largest class: ${payload.largest_class} · Accessibility requests: ${payload.accessibility_count}`;
+    summary.append(heading, detail);
+
+    const cards = payload.recommendations.map(item => {
+        const card = document.createElement("article");
+        card.className = "layout-choice-card";
+
+        const label = document.createElement("span");
+        label.className = "layout-choice-label";
+        label.textContent = `${item.seats_per_bench}-seat shared bench option`;
+
+        const title = document.createElement("h3");
+        title.textContent = `${item.rooms} ${item.rooms === 1 ? "room" : "rooms"} · ${item.rows} rows · ${item.benches} benches per row`;
+
+        const formula = document.createElement("p");
+        formula.className = "layout-choice-formula";
+        formula.textContent = `${item.rooms} × ${item.rows} × ${item.benches} × ${item.seats_per_bench} = ${item.capacity} seats`;
+
+        const explanation = document.createElement("p");
+        explanation.className = "layout-choice-explanation";
+        explanation.textContent = `If you choose this setup, ${payload.student_count} students are arranged across ${item.rooms} room${item.rooms === 1 ? "" : "s"}, leaving ${item.spare_seats} spare seat${item.spare_seats === 1 ? "" : "s"}. It provides ${item.accessible_seats} permitted accessible positions and a same-class separation bound of ${item.independence_bound}.`;
+
+        const button = document.createElement("button");
+        button.className = "button button-secondary layout-choice-button";
+        button.type = "button";
+        button.textContent = "Use this room setup";
+        button.addEventListener("click", () => applyLayoutRecommendation(item, card, list));
+
+        card.append(label, title, formula, explanation, button);
+        return card;
+    });
+    list.replaceChildren(...cards);
+}
+
+function applyLayoutRecommendation(item, selectedCard, list) {
+    const values = {
+        num_rooms: item.rooms,
+        rows: item.rows,
+        cols: item.benches,
+        seats_per_bench: item.seats_per_bench
+    };
+
+    Object.entries(values).forEach(([name, value]) => {
+        const field = document.querySelector(`[name='${name}']`);
+        if (!field) return;
+        field.value = String(value);
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+        field.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    list.querySelectorAll(".layout-choice-card").forEach(card => {
+        const selected = card === selectedCard;
+        card.classList.toggle("is-selected", selected);
+        const button = card.querySelector(".layout-choice-button");
+        if (button) button.textContent = selected ? "Selected setup" : "Use this room setup";
+    });
 }
 
 function initFileInputs() {
