@@ -61,6 +61,15 @@ class TestDiscreteMathSeatingEngine(unittest.TestCase):
         self.assertTrue(status_unf["hard_violation_guaranteed"])
         self.assertTrue(any("PIGEONHOLE" in d["message"] for d in status_unf["diagnostics"]))
 
+    def test_independence_bound_supports_disconnected_multi_room_graph(self):
+        second_room = dict(self.room_configs[0])
+        second_room["room_id"] = 2
+        second_room["accessible_seats"] = []
+        graph = build_seat_adjacency_graph([self.room_configs[0], second_room])
+
+        self.assertFalse(nx.is_connected(graph))
+        self.assertEqual(compute_independence_number_bound(graph), 12)
+
     def test_step2_forbidden_positions(self):
         """Step 2: Test forbidden positions assignment for special-needs students."""
         G_seats = build_seat_adjacency_graph(self.room_configs)

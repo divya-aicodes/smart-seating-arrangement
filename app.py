@@ -382,8 +382,94 @@ def _accessible_seats_per_room(rows, benches, seats_per_bench, rule):
     return columns + max(0, rows - 1) * aisle_per_row
 
 
+def build_manual_room_configs(
+    num_rooms,
+    rows,
+    benches,
+    seats_per_bench,
+    accessible_rule,
+):
+    """Build the same manual seat geometry used by recommendations and assignment."""
+    room_configs = []
+    for room_id in range(1, num_rooms + 1):
+        accessible_seats = []
+        for row_number in range(1, rows + 1):
+            for bench_number in range(1, benches + 1):
+                for seat_number in range(1, seats_per_bench + 1):
+                    seat_id = (
+                        f"R{room_id}-r{row_number}-c{bench_number}-s{seat_number}"
+                    )
+                    is_front = row_number == 1
+                    is_aisle = seat_number in {1, seats_per_bench}
+                    if (
+                        (accessible_rule == "row_1" and is_front)
+                        or (accessible_rule == "aisle" and is_aisle)
+                        or (
+                            accessible_rule == "row_1_and_aisle"
+                            and (is_front or is_aisle)
+                        )
+                        or (
+                            accessible_rule == "front_aisle_only"
+                            and is_front and is_aisle
+                        )
+                    ):
+                        accessible_seats.append(seat_id)
+        room_configs.append({
+            "room_id": room_id,
+            "room_label": f"Manual Room {room_id}",
+            "rows": rows,
+            "cols": benches,
+            "seats_per_bench": seats_per_bench,
+            "accessible_seats": accessible_seats,
+            "unavailable_seats": [],
+        })
+    return room_configs
+
+
+def _layout_is_solvable(
+    students,
+    rooms,
+    rows,
+    benches,
+    seats_per_bench,
+    diagonal,
+    accessible_rule,
+):
+    """Run the actual hard-constraint pipeline before recommending a layout."""
+    room_configs = build_manual_room_configs(
+        rooms,
+        rows,
+        benches,
+        seats_per_bench,
+        accessible_rule,
+    )
+    graph = build_seat_adjacency_graph(room_configs, diagonal=diagonal)
+    special_students = [student for student in students if student.get("special_needs")]
+    try:
+        special_assignments, _, _, _ = assign_special_needs_students(
+            special_students,
+            graph,
+        )
+    except ValueError:
+        return False
+
+    seat_assignments, _, _, unassigned = map_students_to_seats(
+        students,
+        graph,
+        already_assigned_special=special_assignments,
+        diagonal=diagonal,
+    )
+    if unassigned or len(seat_assignments) != len(students):
+        return False
+    return validate_seating_arrangement(
+        seat_assignments,
+        graph,
+        students,
+    )["overall_valid"]
+
+
 def recommend_room_layouts(students, diagonal=False, accessible_rule="row_1_and_aisle"):
-    """Return practical layouts satisfying capacity and necessary graph bounds."""
+    """Return practical layouts that pass bounds and the actual allocation pipeline."""
     if not students:
         return []
 
@@ -418,8 +504,22 @@ def recommend_room_layouts(students, diagonal=False, accessible_rule="row_1_and_
                     )
                     candidates.append((score, rooms, rows, benches, capacity, alpha, accessible))
 
-        if candidates:
-            _, rooms, rows, benches, capacity, alpha, accessible = min(candidates)
+        candidates.sort(key=lambda candidate: candidate[0])
+        selected = next((
+            candidate
+            for candidate in candidates[:24]
+            if _layout_is_solvable(
+                students,
+                candidate[1],
+                candidate[2],
+                candidate[3],
+                seats_per_bench,
+                diagonal,
+                accessible_rule,
+            )
+        ), None)
+        if selected:
+            _, rooms, rows, benches, capacity, alpha, accessible = selected
             recommendations.append({
                 "rooms": rooms,
                 "rows": rows,
@@ -740,39 +840,13 @@ def assign():
                 {"row_1", "aisle", "row_1_and_aisle", "front_aisle_only"},
                 "accessible-seat rule",
             )
-            room_configs = []
-            for room_id in range(1, num_rooms + 1):
-                accessible_seats = []
-                for row_number in range(1, rows + 1):
-                    for bench_number in range(1, cols + 1):
-                        for seat_number in range(1, seats_per_bench + 1):
-                            seat_id = (
-                                f"R{room_id}-r{row_number}-c{bench_number}-s{seat_number}"
-                            )
-                            is_front = row_number == 1
-                            is_aisle = seat_number in {1, seats_per_bench}
-                            if (
-                                (accessible_rule == "row_1" and is_front)
-                                or (accessible_rule == "aisle" and is_aisle)
-                                or (
-                                    accessible_rule == "row_1_and_aisle"
-                                    and (is_front or is_aisle)
-                                )
-                                or (
-                                    accessible_rule == "front_aisle_only"
-                                    and is_front and is_aisle
-                                )
-                            ):
-                                accessible_seats.append(seat_id)
-                room_configs.append({
-                    "room_id": room_id,
-                    "room_label": f"Manual Room {room_id}",
-                    "rows": rows,
-                    "cols": cols,
-                    "seats_per_bench": seats_per_bench,
-                    "accessible_seats": accessible_seats,
-                    "unavailable_seats": [],
-                })
+            room_configs = build_manual_room_configs(
+                num_rooms,
+                rows,
+                cols,
+                seats_per_bench,
+                accessible_rule,
+            )
 
             csv_file = request.files.get("csv_file")
             manual_text = request.form.get("student_data_text", "").strip()

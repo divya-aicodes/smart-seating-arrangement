@@ -333,19 +333,53 @@ class TestFlaskIntegration(unittest.TestCase):
             payload["recommendations"][0],
             {
                 "rooms": 2,
-                "rows": 5,
-                "benches": 3,
+                "rows": 4,
+                "benches": 4,
                 "seats_per_bench": 4,
-                "capacity": 120,
-                "spare_seats": 0,
-                "independence_bound": 60,
-                "accessible_seats": 72,
+                "capacity": 128,
+                "spare_seats": 8,
+                "independence_bound": 64,
+                "accessible_seats": 80,
                 "student_count": 120,
                 "largest_class": 36,
                 "accessibility_count": 0,
                 "adjacency": "orthogonal",
             },
         )
+
+    def test_recommended_multi_room_layout_completes_assignment(self):
+        students = []
+        for class_name, count in {
+            "Electronics": 36,
+            "Computer Science": 32,
+            "Mechanical": 27,
+            "Civil": 25,
+        }.items():
+            students.extend(
+                f"{class_name}-{index},{class_name},Mathematics,N"
+                for index in range(count)
+            )
+
+        response = self.client.post(
+            "/assign",
+            data={
+                "data_mode": "manual",
+                "num_rooms": "2",
+                "rows": "4",
+                "cols": "4",
+                "seats_per_bench": "4",
+                "accessible_rule": "row_1_and_aisle",
+                "invigilator_ratio": "20",
+                "adjacency_rule": "orthogonal",
+                "student_data_text": (
+                    "ID,Class,Subject,Special_Needs\n" + "\n".join(students)
+                ),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Seating plan complete", response.data)
+        self.assertNotIn(b"Application Error", response.data)
 
     def test_layout_recommendation_api_rejects_invalid_csv(self):
         response = self.client.post(
@@ -373,10 +407,11 @@ class TestFlaskIntegration(unittest.TestCase):
         self.assertEqual(four_seat["student_count"], 120)
         self.assertEqual(four_seat["largest_class"], 36)
         self.assertEqual(four_seat["rooms"], 2)
-        self.assertEqual(four_seat["rows"], 5)
-        self.assertEqual(four_seat["benches"], 3)
+        self.assertEqual(four_seat["rows"], 4)
+        self.assertEqual(four_seat["benches"], 4)
         self.assertEqual(four_seat["seats_per_bench"], 4)
-        self.assertEqual(four_seat["capacity"], 120)
+        self.assertEqual(four_seat["capacity"], 128)
+        self.assertEqual(four_seat["spare_seats"], 8)
         self.assertGreaterEqual(four_seat["independence_bound"], 36)
 
     def test_duplicate_student_ids_are_rejected(self):

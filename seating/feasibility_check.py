@@ -110,7 +110,12 @@ def compute_independence_number_bound(G):
     if len(G) == 0:
         return 0
     if nx.is_bipartite(G):
-        matching = nx.bipartite.maximum_matching(G)
+        # Multi-room plans form a disconnected graph. NetworkX cannot infer which
+        # side of a disconnected bipartite graph is the top partition, so derive
+        # and pass an explicit partition for every component.
+        coloring = nx.bipartite.color(G)
+        top_nodes = {node for node, color in coloring.items() if color == 0}
+        matching = nx.bipartite.maximum_matching(G, top_nodes=top_nodes)
         # matching includes both directions (u->v, v->u), so divide by 2
         return len(G) - (len(matching) // 2)
     else:

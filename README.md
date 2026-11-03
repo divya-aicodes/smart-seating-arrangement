@@ -541,10 +541,12 @@ constructs room geometry from the form. Before generation, the planner sends the
 CSV to a CSRF- and origin-protected same-origin endpoint. The backend validates
 the records and returns up to three one-click layout choices based on capacity,
 largest-class independent-set bounds, accessibility requests, and the selected
-adjacency rule. Choosing a card fills room count, rows, benches per row, and
-seats per bench; users remain responsible for choosing geometry that physically
-exists. Manual runs record an audit event but do not create a database
-`SeatingRun` or persistent allocations.
+adjacency rule. Each candidate must also complete a dry run through the actual
+accessibility assignment, seat mapper, and hard-constraint validator before it
+is shown. Choosing a card fills room count, rows, benches per row, and seats per
+bench; users remain responsible for choosing geometry that physically exists.
+Manual runs record an audit event but do not create a database `SeatingRun` or
+persistent allocations.
 
 ### Persisted planning data
 
