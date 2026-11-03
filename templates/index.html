@@ -1,200 +1,219 @@
 {% extends "base.html" %}
 
-{% block title %}Create a Seating Plan | Examination Seating Planner{% endblock %}
+{% block title %}Create a Seating Plan | SeatPlan{% endblock %}
 
 {% block content %}
-<section class="hero">
-    <div class="hero-badge">Examination operations</div>
-    <h1 class="hero-title">Create a defensible seating plan</h1>
-    <p class="hero-desc">
-        Allocate students from stored or one-time records, enforce accessibility and adjacency rules,
-        and review the discrete mathematics used to validate the result.
-    </p>
+<section class="planner-hero page-shell">
+    <div class="planner-hero-copy reveal">
+        <p class="eyebrow"><span>Planning workspace</span></p>
+        <h1>Create a defensible seating plan</h1>
+        <p class="hero-lead">
+            Build an examination seating plan from persisted records or a one-time CSV. The solver checks capacity,
+            accessibility and adjacency before any database-backed run is stored.
+        </p>
+        <div class="method-line" aria-label="Implemented mathematical methods">
+            <span>Pigeonhole Principle</span>
+            <span>Graph constraints</span>
+            <span>Formal validation</span>
+        </div>
+    </div>
+
+    <aside class="process-board reveal" aria-label="Planning workflow">
+        <div class="process-board-header">
+            <span>Workflow</span>
+            <span class="status-dot"><i></i> Ready</span>
+        </div>
+        <ol class="process-list">
+            <li><span>01</span><div><strong>Select records</strong><small>Stored dataset or one-time CSV</small></div></li>
+            <li><span>02</span><div><strong>Define constraints</strong><small>Rooms, adjacency and accessibility</small></div></li>
+            <li><span>03</span><div><strong>Generate and verify</strong><small>Seat map, validation and exports</small></div></li>
+        </ol>
+    </aside>
 </section>
 
-<form id="seating-form" action="{{ url_for('assign') }}" method="POST" enctype="multipart/form-data">
+<form id="seating-form" class="planner-form page-shell" action="{{ url_for('assign') }}" method="POST" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <div class="card">
-        <div class="card-header">
-            <div class="card-title">1. Select the data source</div>
-            <a href="{{ url_for('data.data_management') }}" class="btn btn-outline btn-sm">
-                Manage data
-            </a>
-        </div>
 
-        <div class="form-group" style="margin-bottom: 1rem;">
-            <label class="form-label" for="data_mode">Run using</label>
-            <select id="data_mode" name="data_mode" class="form-select">
-                <option value="database" {{ 'selected' if available_exams and available_rooms else '' }}>
-                    Persisted database records
-                </option>
-                <option value="manual" {{ 'selected' if not available_exams or not available_rooms else '' }}>
-                    One-time manual CSV (not persisted)
-                </option>
-            </select>
-        </div>
+    <section class="workflow-section reveal" aria-labelledby="source-heading">
+        <div class="workflow-number" aria-hidden="true">01</div>
+        <div class="workflow-content">
+            <header class="section-heading">
+                <div>
+                    <p class="section-kicker">Source</p>
+                    <h2 id="source-heading">Choose the examination records</h2>
+                    <p>Use connected database records for a reportable run, or upload temporary records for one calculation.</p>
+                </div>
+                <a class="text-link" href="{{ url_for('data.data_management') }}">Manage records <span aria-hidden="true">→</span></a>
+            </header>
 
-        <div id="database-source-fields">
-            {% if available_exams and available_rooms %}
-            <div class="form-grid">
-                <div class="form-group">
-                    <label class="form-label" for="exam_id">Persisted Exam Session</label>
-                    <select id="exam_id" name="exam_id" class="form-select">
-                        {% for exam in available_exams %}
-                        <option value="{{ exam.id }}" data-dataset-id="{{ exam.dataset_id }}">
-                            {{ exam.exam_date }} · {{ exam.session_name }} ·
-                            {{ exam.dataset.name if exam.dataset else exam.subject.name }}
-                            [{{ exam.source_type | upper }}]
-                        </option>
-                        {% endfor %}
-                    </select>
+            <fieldset class="source-switch">
+                <legend class="sr-only">Data source</legend>
+                <label class="source-option">
+                    <input type="radio" name="data_mode" value="database" {{ 'checked' if available_exams and available_rooms else '' }}>
+                    <span class="source-option-body">
+                        <span class="source-option-mark" aria-hidden="true"></span>
+                        <span><strong>Connected records</strong><small>Persist the run and enable verified reports</small></span>
+                    </span>
+                </label>
+                <label class="source-option">
+                    <input type="radio" name="data_mode" value="manual" {{ 'checked' if not available_exams or not available_rooms else '' }}>
+                    <span class="source-option-body">
+                        <span class="source-option-mark" aria-hidden="true"></span>
+                        <span><strong>One-time CSV</strong><small>Process temporary records without storing them</small></span>
+                    </span>
+                </label>
+            </fieldset>
+
+            <div id="database-source-fields" class="source-panel">
+                {% if available_exams and available_rooms %}
+                <div class="field-grid field-grid-two">
+                    <div class="field-group">
+                        <label for="exam_id">Exam session</label>
+                        <select id="exam_id" name="exam_id" class="field-control">
+                            {% for exam in available_exams %}
+                            <option value="{{ exam.id }}" data-dataset-id="{{ exam.dataset_id }}">
+                                {{ exam.exam_date }} · {{ exam.session_name }} · {{ exam.dataset.name if exam.dataset else exam.subject.name }} [{{ exam.source_type | upper }}]
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="field-group">
+                        <label for="room_ids">Rooms</label>
+                        <select id="room_ids" name="room_ids" class="field-control field-control-multiple" multiple size="5">
+                            {% for room in available_rooms %}
+                            <option value="{{ room.id }}" data-dataset-id="{{ room.dataset_id or '' }}">
+                                {{ room.building }} / {{ room.room_number }} · {{ room.capacity }} seats [{{ room.source_type | upper }}]
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <small class="field-help">Only rooms belonging to the selected dataset can be chosen. Use Ctrl or Cmd for multiple rooms.</small>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label class="form-label" for="room_ids">Persisted Rooms</label>
-                    <select id="room_ids" name="room_ids" class="form-select" multiple size="5">
-                        {% for room in available_rooms %}
-                        <option value="{{ room.id }}" data-dataset-id="{{ room.dataset_id or '' }}">
-                            {{ room.building }} / {{ room.room_number }} · {{ room.capacity }} seats
-                            [{{ room.source_type | upper }}]
-                        </option>
-                        {% endfor %}
-                    </select>
-                    <span class="form-help">Only rooms from the selected exam dataset are enabled. Use Ctrl/Cmd to select multiple rooms.</span>
+                {% else %}
+                <div class="empty-inline">
+                    <div class="empty-inline-mark" aria-hidden="true">!</div>
+                    <div>
+                        <strong>No complete stored dataset is ready.</strong>
+                        <p>Import institutional records or generate a labelled synthetic dataset, then add at least one matching room.</p>
+                    </div>
+                    <a class="button button-secondary button-small" href="{{ url_for('data.data_management') }}">Open data workspace</a>
                 </div>
+                {% endif %}
             </div>
-            {% else %}
-            <div class="alert alert-warning">
-                No complete persisted exam-and-room dataset is available yet.
-                <a href="{{ url_for('data.data_management') }}">Import real data or generate synthetic data</a>.
-            </div>
-            {% endif %}
         </div>
-    </div>
+    </section>
 
     <div id="manual-source-fields">
-    <!-- Configuration Card: Room & Exam Parameters -->
-    <div class="card">
-        <div class="card-header">
-            <div class="card-title">
-                2. Define the room layout
-            </div>
-            <div class="card-subtitle">Used only for a one-time CSV run</div>
-        </div>
+        <section class="workflow-section reveal" aria-labelledby="layout-heading">
+            <div class="workflow-number" aria-hidden="true">02</div>
+            <div class="workflow-content">
+                <header class="section-heading">
+                    <div>
+                        <p class="section-kicker">Layout</p>
+                        <h2 id="layout-heading">Describe the physical room setup</h2>
+                        <p>These values generate the seat graph used by the adjacency checks.</p>
+                    </div>
+                    <span class="section-note">One-time CSV only</span>
+                </header>
 
-        <div class="form-grid">
-            <div class="form-group">
-                <label class="form-label" for="num_rooms">Number of Examination Rooms</label>
-                <input type="number" id="num_rooms" name="num_rooms" class="form-input" value="1" min="1" max="10" required>
-                <span class="form-help">Students will be partitioned across rooms sequentially</span>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label" for="rows">Bench Rows per Room</label>
-                <input type="number" id="rows" name="rows" class="form-input" value="4" min="1" max="20" required>
-                <span class="form-help">Number of horizontal bench tiers</span>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label" for="cols">Benches per Row (Columns)</label>
-                <input type="number" id="cols" name="cols" class="form-input" value="3" min="1" max="15" required>
-                <span class="form-help">Number of bench columns</span>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label" for="seats_per_bench">Seats per Bench</label>
-                <select id="seats_per_bench" name="seats_per_bench" class="form-select">
-                    <option value="1">1 Seat per Bench (Single Desk)</option>
-                    <option value="2" selected>2 Seats per Bench (Dual Desk)</option>
-                </select>
-                <span class="form-help">Determines horizontal bench adjacency</span>
-            </div>
-        </div>
-
-        <div class="form-grid">
-            <div class="form-group">
-                <label class="form-label" for="accessible_rule">
-                    Accessible Seats Criterion
-                    <span class="field-notation">Permitted set B'</span>
-                </label>
-                <select id="accessible_rule" name="accessible_rule" class="form-select">
-                    <option value="row_1_and_aisle" selected>Row 1 (Front Row) + Aisle Seats</option>
-                    <option value="row_1">Row 1 (Front Row Only)</option>
-                    <option value="aisle">Aisle Seats Only (Left/Right Ends)</option>
-                    <option value="front_aisle_only">Front Row Corner Aisles Only</option>
-                </select>
-                <span class="form-help">Positions permitted for students requiring accessible seating</span>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label" for="invigilator_ratio">Invigilator Ratio</label>
-                <input type="number" id="invigilator_ratio" name="invigilator_ratio" class="form-input" value="20" min="5" max="50">
-                <span class="form-help">Maximum students assigned to each generated invigilator slot</span>
-            </div>
-
-            <div class="form-group">
-                <label class="form-label">Seat Adjacency Definition</label>
-                <div class="radio-options">
-                    <label style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; cursor: pointer;">
-                        <input type="radio" name="adjacency_rule" value="orthogonal" checked>
-                        <span>Orthogonal (Left/Right, Front/Back)</span>
-                    </label>
-                    <label style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; cursor: pointer;">
-                        <input type="radio" name="adjacency_rule" value="diagonal">
-                        <span>Include Diagonals (King's Graph)</span>
-                    </label>
+                <div class="field-grid field-grid-four">
+                    <div class="field-group">
+                        <label for="num_rooms">Examination rooms</label>
+                        <input id="num_rooms" name="num_rooms" class="field-control" type="number" value="1" min="1" max="10" required>
+                        <small class="field-help">1–10 rooms</small>
+                    </div>
+                    <div class="field-group">
+                        <label for="rows">Bench rows</label>
+                        <input id="rows" name="rows" class="field-control" type="number" value="4" min="1" max="20" required>
+                        <small class="field-help">Rows in each room</small>
+                    </div>
+                    <div class="field-group">
+                        <label for="cols">Benches per row</label>
+                        <input id="cols" name="cols" class="field-control" type="number" value="3" min="1" max="15" required>
+                        <small class="field-help">Bench columns</small>
+                    </div>
+                    <div class="field-group">
+                        <label for="seats_per_bench">Seats per bench</label>
+                        <select id="seats_per_bench" name="seats_per_bench" class="field-control">
+                            <option value="1">1 · Single desk</option>
+                            <option value="2" selected>2 · Shared bench</option>
+                        </select>
+                        <small class="field-help">Controls horizontal adjacency</small>
+                    </div>
                 </div>
-                <span class="form-help">Default is orthogonal non-diagonal neighborhood</span>
+
+                <div class="field-grid field-grid-three layout-secondary-fields">
+                    <div class="field-group">
+                        <label for="accessible_rule">Accessible seat rule</label>
+                        <select id="accessible_rule" name="accessible_rule" class="field-control">
+                            <option value="row_1_and_aisle" selected>Front row and aisle seats</option>
+                            <option value="row_1">Front row only</option>
+                            <option value="aisle">Aisle seats only</option>
+                            <option value="front_aisle_only">Front aisle corners only</option>
+                        </select>
+                        <small class="field-help">Permitted positions for accessibility requests</small>
+                    </div>
+                    <div class="field-group">
+                        <label for="invigilator_ratio">Students per invigilator</label>
+                        <input id="invigilator_ratio" name="invigilator_ratio" class="field-control" type="number" value="20" min="5" max="50" required>
+                        <small class="field-help">Used to calculate generated invigilator slots</small>
+                    </div>
+                    <fieldset class="field-group radio-fieldset">
+                        <legend>Adjacent seats include</legend>
+                        <label class="radio-line"><input type="radio" name="adjacency_rule" value="orthogonal" checked><span>Left, right, front and back</span></label>
+                        <label class="radio-line"><input type="radio" name="adjacency_rule" value="diagonal"><span>Orthogonal and diagonal neighbours</span></label>
+                    </fieldset>
+                </div>
+
+                <div id="capacity-preview" class="capacity-strip" aria-live="polite"></div>
             </div>
-        </div>
+        </section>
 
-        <!-- Live Capacity Indicator -->
-        <div id="capacity-preview" class="capacity-preview">
-            <!-- Updated dynamically by JS -->
-        </div>
-    </div>
+        <section class="workflow-section reveal" aria-labelledby="records-heading">
+            <div class="workflow-number" aria-hidden="true">03</div>
+            <div class="workflow-content">
+                <header class="section-heading">
+                    <div>
+                        <p class="section-kicker">Candidates</p>
+                        <h2 id="records-heading">Add student records</h2>
+                        <p>Choose one input method. Manual records are used for this run only.</p>
+                    </div>
+                    <a class="text-link" href="{{ url_for('sample_csv') }}">Download empty template <span aria-hidden="true">↓</span></a>
+                </header>
 
-    <!-- Configuration Card: Student Data Input -->
-    <div class="card">
-        <div class="card-header">
-            <div class="card-title">
-                3. Add student records
-            </div>
-            <div class="card-subtitle">CSV upload or direct text entry</div>
-        </div>
+                <div class="record-input-grid">
+                    <div class="upload-panel">
+                        <div class="input-method-label"><span>A</span> Upload a CSV file</div>
+                        <label class="file-drop" for="csv_file">
+                            <input id="csv_file" name="csv_file" type="file" accept=".csv,text/csv" data-file-input>
+                            <span class="file-drop-icon" aria-hidden="true">
+                                <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+                            </span>
+                            <strong>Choose a student CSV</strong>
+                            <small data-file-name>No file selected</small>
+                        </label>
+                        <p class="schema-note"><strong>Accepted columns</strong> ID, Name, Class, Department, Subject_Code, Subject, Special_Needs</p>
+                    </div>
 
-        <div class="student-input-grid">
-            <!-- File Upload Option -->
-            <div class="form-group">
-                <label class="form-label" for="csv_file">Option A: Upload Student CSV</label>
-                <div class="file-drop-area">
-                    <input type="file" id="csv_file" name="csv_file" accept=".csv" class="form-input" style="width: 100%; margin-bottom: 0.75rem;">
-                    <p style="font-size: 0.78rem; color: var(--text-muted);">
-                        Supported headers: <code>ID</code>, <code>Class</code>, <code>Subject</code>, <code>Special_Needs</code> (Y/N).
-                    </p>
-                    <div style="margin-top: 1rem; display: flex; justify-content: center; gap: 0.5rem;">
-                        <a href="{{ url_for('sample_csv', preset='balanced') }}" class="btn btn-outline btn-sm">
-                            &darr; Empty Import Template
-                        </a>
+                    <div class="paste-panel">
+                        <div class="input-method-label"><span>B</span> Paste CSV text</div>
+                        <label class="sr-only" for="student_data_text">Student CSV text</label>
+                        <textarea id="student_data_text" name="student_data_text" class="field-control code-input" rows="10" placeholder="ID,Class,Subject,Special_Needs&#10;STU001,CSE-A,Discrete Mathematics,N"></textarea>
+                        <small class="field-help">Keep the header row. Leave this blank when uploading a file.</small>
                     </div>
                 </div>
             </div>
+        </section>
+    </div>
 
-            <!-- Direct Text Entry Option -->
-            <div class="form-group">
-                <div class="form-label">
-                    <span>Option B: Direct CSV Data Entry / Quick Edit</span>
-                    <span style="font-size: 0.75rem; color: var(--text-muted); font-family: var(--font-mono);">Comma-Separated</span>
-                </div>
-                <textarea id="student_data_text" name="student_data_text" rows="9" class="form-textarea" placeholder="Paste a CSV header and your student records here."></textarea>
-                <span class="form-help">Manual records are used for this run only and are not stored.</span>
-            </div>
+    <div class="submission-bar reveal">
+        <div class="submission-copy">
+            <span class="submission-check" aria-hidden="true">✓</span>
+            <span><strong>Validation is mandatory</strong><small>No invalid hard-constraint fallback is published or stored.</small></span>
         </div>
-    </div>
-    </div>
-
-    <div class="form-actions">
-        <button type="submit" class="btn btn-primary" style="padding: 0.85rem 2.5rem; font-size: 1.05rem;">
-            Generate and validate seating plan
+        <button class="button button-primary button-large" type="submit" data-submit-button>
+            <span>Generate seating plan</span>
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10h12m0 0-4-4m4 4-4 4"/></svg>
         </button>
     </div>
 </form>

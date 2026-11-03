@@ -3,71 +3,61 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Examination Seating Planner{% endblock %}</title>
+    <meta name="theme-color" content="#f6f7f5">
+    <title>{% block title %}SeatPlan | Examination Operations{% endblock %}</title>
     <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-    
-    <!-- Editorial typography for an academic operations interface -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,600;8..60,700&display=swap" rel="stylesheet">
-    
-    <!-- Application Stylesheet -->
+    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600;700&family=Barlow+Condensed:wght@600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script>document.documentElement.classList.add('js');</script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    
-    <!-- MathJax for Discrete Mathematics LaTeX Formulas -->
-    <script>
-        window.MathJax = {
-            tex: {
-                inlineMath: [['$', '$'], ['\\(', '\\)']],
-                displayMath: [['$$', '$$'], ['\\[', '\\]']],
-                processEscapes: true
-            },
-            options: {
-                ignoreHtmlClass: 'tex2jax_ignore',
-                processHtmlClass: 'tex2jax_process'
-            }
-        };
-    </script>
-    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     {% block extra_head %}{% endblock %}
 </head>
 <body>
-    <!-- Navbar -->
-    <nav class="navbar">
-        <a href="{{ url_for('index') }}" class="brand-container">
-            <div class="brand-logo" aria-hidden="true">ES</div>
-            <div>
-                <div class="brand-title">Examination Seating Planner</div>
-                <div class="brand-subtitle">Constraint-based allocation and validation</div>
-            </div>
-        </a>
-        
-        <div class="nav-actions">
-            <div class="dropdown-presets no-print">
-                <a href="{{ url_for('data.data_management') }}" class="btn btn-outline btn-sm">
+    <a class="skip-link" href="#main-content">Skip to main content</a>
+
+    <header class="site-header" data-site-header>
+        <div class="header-inner">
+            <a class="brand" href="{{ url_for('index') }}" aria-label="SeatPlan home">
+                <span class="brand-mark" aria-hidden="true">
+                    <span>SP</span>
+                </span>
+                <span class="brand-copy">
+                    <strong>SeatPlan</strong>
+                    <small>Examination Operations</small>
+                </span>
+            </a>
+
+            <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="primary-navigation" data-nav-toggle>
+                <span class="sr-only">Toggle navigation</span>
+                <span></span><span></span><span></span>
+            </button>
+
+            <nav class="primary-nav" id="primary-navigation" aria-label="Primary navigation" data-primary-nav>
+                <a href="{{ url_for('index') }}" class="nav-link {{ 'is-active' if request.endpoint == 'index' else '' }}">
+                    New plan
+                </a>
+                <a href="{{ url_for('data.data_management') }}" class="nav-link {{ 'is-active' if request.endpoint and request.endpoint.startswith('data.') else '' }}">
                     Data
                 </a>
-                <a href="{{ url_for('sample_csv') }}" class="btn btn-outline btn-sm">
-                    CSV template
-                </a>
-                <a href="{{ url_for('reports.dashboard') }}" class="btn btn-outline btn-sm">
+                <a href="{{ url_for('reports.dashboard') }}" class="nav-link {{ 'is-active' if request.endpoint and request.endpoint.startswith('reports.') else '' }}">
                     Reports
                 </a>
-            </div>
-            <a href="{{ url_for('index') }}" class="btn btn-secondary btn-sm no-print">
-                New seating plan
-            </a>
+                <a href="{{ url_for('sample_csv') }}" class="nav-link nav-link-download">
+                    CSV template
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8m0 0 3-3m-3 3L5 7M3 13h10"/></svg>
+                </a>
+            </nav>
         </div>
-    </nav>
+    </header>
 
-    <!-- Main Content Container -->
-    <main class="container">
-        <!-- Flash Messages -->
+    <main id="main-content" class="site-main">
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
-                <div class="flash-messages no-print">
+                <div class="flash-stack page-shell no-print" aria-live="polite">
                     {% for category, message in messages %}
-                        <div class="alert alert-{{ category if category != 'message' else 'info' }}">
+                        <div class="flash flash-{{ category if category != 'message' else 'info' }}" role="status">
+                            <span class="flash-indicator" aria-hidden="true"></span>
                             <span>{{ message }}</span>
                         </div>
                     {% endfor %}
@@ -78,17 +68,20 @@
         {% block content %}{% endblock %}
     </main>
 
-    <!-- Footer -->
-    <footer class="footer no-print" style="border-top: 1px solid var(--border-color); padding: 1.5rem 2rem; text-align: center; font-size: 0.8rem; color: var(--text-muted);">
-        <p>
-            Constraint-based examination seating &bull; Methods: 
-            <strong>Pigeonhole Principle</strong>, <strong>Rook Polynomials (Forbidden Positions)</strong>, 
-            <strong>Graph Coloring &amp; Handshaking Lemma</strong>, <strong>Chromatic Polynomials</strong>, 
-            <strong>Propositional Logic Predicates</strong>, and <strong>Principle of Inclusion-Exclusion (PIE)</strong>.
-        </p>
+    <footer class="site-footer no-print">
+        <div class="footer-inner">
+            <div>
+                <strong>SeatPlan</strong>
+                <span>Constraint-based examination seating</span>
+            </div>
+            <div class="footer-meta">
+                <span>Database connected</span>
+                <span>Hard-constraint validation</span>
+                <span>PDF, Excel and CSV exports</span>
+            </div>
+        </div>
     </footer>
 
-    <!-- Scripts -->
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>
     {% block extra_scripts %}{% endblock %}
 </body>

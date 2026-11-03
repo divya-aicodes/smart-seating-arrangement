@@ -1,5 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="ES">
-  <rect width="64" height="64" rx="6" fill="#e4ece8"/>
-  <rect x="1" y="1" width="62" height="62" rx="5" fill="none" stroke="#b5c7c1" stroke-width="2"/>
-  <text x="32" y="39" text-anchor="middle" fill="#285b5a" font-family="Georgia,serif" font-size="24" font-weight="700">ES</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="SeatPlan">
+  <rect width="64" height="64" rx="5" fill="#ffffff"/>
+  <rect x="3" y="3" width="58" height="58" rx="2" fill="none" stroke="#17324d" stroke-width="4"/>
+  <path d="M18 22h28M18 32h18M18 42h28" stroke="#2f648f" stroke-width="4" stroke-linecap="square"/>
+  <rect x="42" y="27" width="9" height="9" fill="#bd5b32"/>
 </svg>
