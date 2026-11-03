@@ -193,9 +193,11 @@ code { padding: 0.12rem 0.3rem; background: var(--surface-alt); border: 1px soli
 .upload-panel, .paste-panel { min-width: 0; padding: 1rem; background: #fafbfa; border: 1px solid var(--line); }
 .input-method-label { margin-bottom: 0.8rem; display: flex; align-items: center; gap: 0.55rem; color: var(--navy); font-size: 0.82rem; font-weight: 700; }
 .input-method-label span { width: 24px; height: 24px; display: grid; place-items: center; background: var(--navy); color: #fff; font-family: var(--font-mono); font-size: 0.68rem; }
-.file-drop { min-height: 175px; padding: 1.2rem; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #fff; border: 1px dashed #9aaab3; cursor: pointer; text-align: center; transition: background 150ms ease, border 150ms ease; }
-.file-drop:hover { background: var(--blue-soft); border-color: var(--blue); }
-.file-drop input { position: absolute; opacity: 0; pointer-events: none; }
+.file-drop { min-height: 175px; padding: 1.2rem; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; overflow: hidden; background: #fff; border: 1px dashed #9aaab3; cursor: pointer; text-align: center; transition: background 150ms ease, border 150ms ease, box-shadow 150ms ease; }
+.file-drop:hover, .file-drop:focus-within { background: var(--blue-soft); border-color: var(--blue); }
+.file-drop:focus-within { box-shadow: 0 0 0 3px rgba(47, 100, 143, 0.13); }
+.file-drop.is-selected { background: var(--green-soft); border-color: var(--green); border-style: solid; }
+.file-drop input { width: 100%; height: 100%; position: absolute; inset: 0; z-index: 2; opacity: 0; cursor: pointer; }
 .file-drop-icon { width: 40px; height: 40px; margin-bottom: 0.65rem; display: grid; place-items: center; background: var(--surface-alt); color: var(--blue); border-radius: 50%; }
 .file-drop-icon svg { width: 22px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .file-drop strong { color: var(--navy); font-size: 0.88rem; }
@@ -245,10 +247,28 @@ code { padding: 0.12rem 0.3rem; background: var(--surface-alt); border: 1px soli
 .operation-body { padding: 1.4rem; animation: detail-open 220ms ease both; }
 .form-footer { margin-top: 1.1rem; padding-top: 1rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-top: 1px solid var(--line); }
 .form-footer p { color: var(--muted); font-size: 0.74rem; }
-.inline-file-control { min-height: 46px; display: grid; grid-template-columns: auto 1fr; align-items: center; border: 1px solid var(--line-strong); background: #fff; cursor: pointer; }
-.inline-file-control input { position: absolute; opacity: 0; pointer-events: none; }
+.inline-file-control { min-height: 46px; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; position: relative; overflow: hidden; border: 1px solid var(--line-strong); background: #fff; cursor: pointer; transition: border-color 150ms ease, box-shadow 150ms ease; }
+.inline-file-control:hover, .inline-file-control:focus-within { border-color: var(--blue); }
+.inline-file-control:focus-within { box-shadow: 0 0 0 3px rgba(47, 100, 143, 0.12); }
+.inline-file-control.is-selected { border-color: var(--green); background: var(--green-soft); }
+.inline-file-control input { width: 100%; height: 100%; position: absolute; inset: 0; z-index: 2; opacity: 0; cursor: pointer; }
 .inline-file-control span { height: 100%; padding: 0.72rem 1rem; display: grid; place-items: center; background: var(--surface-alt); border-right: 1px solid var(--line); color: var(--navy); font-size: 0.78rem; font-weight: 700; }
 .inline-file-control small { padding: 0.65rem 0.8rem; color: var(--muted); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inline-file-control.is-selected small, .file-drop.is-selected small { color: var(--green); font-weight: 600; }
+.csv-file-preview { margin-top: 0.7rem; overflow: hidden; background: #fff; border: 1px solid #a8c8b9; border-left: 4px solid var(--green); }
+.csv-file-preview.has-error { border-color: #d8a6a2; border-left-color: var(--red); background: var(--red-soft); }
+.csv-preview-summary { padding: 0.68rem 0.8rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; background: var(--green-soft); border-bottom: 1px solid #c8ddd3; }
+.csv-file-preview.has-error .csv-preview-summary { background: var(--red-soft); border-bottom-color: #e7c2bf; }
+.csv-preview-summary strong { color: var(--green); font-size: 0.78rem; }
+.csv-file-preview.has-error .csv-preview-summary strong { color: var(--red); }
+.csv-preview-summary span { color: var(--muted); font-family: var(--font-mono); font-size: 0.64rem; }
+.csv-preview-table-wrap { max-height: 210px; overflow: auto; }
+.csv-preview-table { width: 100%; border-collapse: collapse; font-size: 0.68rem; }
+.csv-preview-table th, .csv-preview-table td { max-width: 180px; padding: 0.48rem 0.58rem; overflow: hidden; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.csv-preview-table th { position: sticky; top: 0; background: var(--surface-alt); color: var(--navy); font-size: 0.62rem; letter-spacing: 0.03em; text-transform: uppercase; }
+.csv-preview-message { padding: 0.55rem 0.8rem; color: var(--muted); font-size: 0.68rem; }
+.csv-file-preview.has-error .csv-preview-table-wrap { display: none; }
+.csv-file-preview.has-error .csv-preview-message { color: var(--red); }
 .empty-state { padding: 2.5rem; background: var(--surface-alt); border: 1px dashed var(--line-strong); text-align: center; }
 .compact-empty { padding: 1.5rem; }.empty-state strong { color: var(--navy); }.empty-state p { margin-top: 0.25rem; color: var(--muted); font-size: 0.8rem; }
 

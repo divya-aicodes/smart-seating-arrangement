@@ -151,15 +151,189 @@ function createCapacityItem(text, strong = false) {
 
 function initFileInputs() {
     document.querySelectorAll("[data-file-input]").forEach(input => {
-        const container = input.closest("label") || input.parentElement;
-        const label = container?.querySelector("[data-file-name]");
-        if (!label) return;
+        const control = input.closest("[data-file-control]") || input.closest("label") || input.parentElement;
+        const fileName = control?.querySelector("[data-file-name]");
+        const action = control?.querySelector("[data-file-action]");
+        if (!control || !fileName) return;
 
-        input.addEventListener("change", () => {
+        const preview = createFilePreview(control);
+        const update = async () => {
             const file = input.files?.[0];
-            label.textContent = file ? `${file.name} · ${formatFileSize(file.size)}` : "No file selected";
-        });
+            input.setCustomValidity("");
+            control.classList.toggle("is-selected", Boolean(file));
+
+            if (!file) {
+                fileName.textContent = "No file selected";
+                fileName.removeAttribute("title");
+                if (action) action.textContent = control.classList.contains("file-drop") ? "Choose a student CSV" : "Choose file";
+                resetFilePreview(preview);
+                return;
+            }
+
+            fileName.textContent = `${file.name} · ${formatFileSize(file.size)}`;
+            fileName.title = file.name;
+            if (action) action.textContent = "Change file";
+
+            if (!/\.csv$/i.test(file.name)) {
+                const message = "Choose a file with the .csv extension.";
+                input.setCustomValidity(message);
+                showFilePreviewError(preview, message);
+                return;
+            }
+            if (file.size > 2 * 1024 * 1024) {
+                const message = "This file is larger than the 2 MiB upload limit.";
+                input.setCustomValidity(message);
+                showFilePreviewError(preview, message);
+                return;
+            }
+
+            await renderCsvPreview(input, file, preview);
+        };
+
+        input.addEventListener("change", update);
+        input.addEventListener("input", update);
+        update();
     });
+}
+
+function createFilePreview(control) {
+    const preview = document.createElement("section");
+    preview.className = "csv-file-preview";
+    preview.hidden = true;
+    preview.setAttribute("aria-live", "polite");
+
+    const summary = document.createElement("div");
+    summary.className = "csv-preview-summary";
+    const title = document.createElement("strong");
+    title.dataset.csvPreviewTitle = "";
+    const meta = document.createElement("span");
+    meta.dataset.csvPreviewMeta = "";
+    summary.append(title, meta);
+
+    const tableWrap = document.createElement("div");
+    tableWrap.className = "csv-preview-table-wrap";
+    const table = document.createElement("table");
+    table.className = "csv-preview-table";
+    const head = document.createElement("thead");
+    head.dataset.csvPreviewHead = "";
+    const body = document.createElement("tbody");
+    body.dataset.csvPreviewBody = "";
+    table.append(head, body);
+    tableWrap.append(table);
+
+    const message = document.createElement("p");
+    message.className = "csv-preview-message";
+    message.dataset.csvPreviewMessage = "";
+
+    preview.append(summary, tableWrap, message);
+    control.insertAdjacentElement("afterend", preview);
+    return preview;
+}
+
+function resetFilePreview(preview) {
+    preview.hidden = true;
+    preview.classList.remove("has-error");
+    preview.querySelector("[data-csv-preview-head]").replaceChildren();
+    preview.querySelector("[data-csv-preview-body]").replaceChildren();
+    preview.querySelector("[data-csv-preview-message]").textContent = "";
+}
+
+function showFilePreviewError(preview, message) {
+    resetFilePreview(preview);
+    preview.hidden = false;
+    preview.classList.add("has-error");
+    preview.querySelector("[data-csv-preview-title]").textContent = "CSV cannot be uploaded";
+    preview.querySelector("[data-csv-preview-meta]").textContent = "Check the file and choose another.";
+    preview.querySelector("[data-csv-preview-message]").textContent = message;
+}
+
+async function renderCsvPreview(input, file, preview) {
+    try {
+        const text = (await file.text()).replace(/^\uFEFF/, "");
+        if (input.files?.[0] !== file) return;
+
+        const rows = parseCsvPreviewRows(text).filter(row => row.some(cell => cell.trim()));
+        if (!rows.length || !rows[0].some(cell => cell.trim())) {
+            const message = "The selected CSV is empty or has no header row.";
+            input.setCustomValidity(message);
+            showFilePreviewError(preview, message);
+            return;
+        }
+
+        const header = rows[0];
+        const records = rows.slice(1);
+        const visibleColumns = header.slice(0, 8);
+        const visibleRecords = records.slice(0, 5);
+        const head = preview.querySelector("[data-csv-preview-head]");
+        const body = preview.querySelector("[data-csv-preview-body]");
+        const headingRow = document.createElement("tr");
+
+        visibleColumns.forEach(column => {
+            const cell = document.createElement("th");
+            cell.textContent = column || "Unnamed column";
+            headingRow.append(cell);
+        });
+        head.replaceChildren(headingRow);
+
+        const renderedRows = visibleRecords.map(record => {
+            const row = document.createElement("tr");
+            visibleColumns.forEach((_, index) => {
+                const cell = document.createElement("td");
+                cell.textContent = record[index] || "—";
+                row.append(cell);
+            });
+            return row;
+        });
+        body.replaceChildren(...renderedRows);
+
+        preview.hidden = false;
+        preview.classList.remove("has-error");
+        preview.querySelector("[data-csv-preview-title]").textContent = "CSV ready to upload";
+        preview.querySelector("[data-csv-preview-meta]").textContent = `${records.length} data ${records.length === 1 ? "row" : "rows"} · ${header.length} ${header.length === 1 ? "column" : "columns"}`;
+        preview.querySelector("[data-csv-preview-message]").textContent = records.length > 5
+            ? `Showing the first 5 of ${records.length} rows. The server validates every row.`
+            : "Preview complete. The server validates every row before saving.";
+    } catch (error) {
+        const message = "The browser could not read this file. Choose the CSV again.";
+        input.setCustomValidity(message);
+        showFilePreviewError(preview, message);
+    }
+}
+
+function parseCsvPreviewRows(text) {
+    const rows = [];
+    let row = [];
+    let field = "";
+    let quoted = false;
+
+    for (let index = 0; index < text.length; index += 1) {
+        const character = text[index];
+        if (character === '"') {
+            if (quoted && text[index + 1] === '"') {
+                field += '"';
+                index += 1;
+            } else {
+                quoted = !quoted;
+            }
+        } else if (character === "," && !quoted) {
+            row.push(field);
+            field = "";
+        } else if ((character === "\n" || character === "\r") && !quoted) {
+            if (character === "\r" && text[index + 1] === "\n") index += 1;
+            row.push(field);
+            rows.push(row);
+            row = [];
+            field = "";
+        } else {
+            field += character;
+        }
+    }
+
+    if (field.length || row.length) {
+        row.push(field);
+        rows.push(row);
+    }
+    return rows;
 }
 
 function formatFileSize(bytes) {

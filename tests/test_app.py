@@ -78,6 +78,14 @@ class TestFlaskIntegration(unittest.TestCase):
         self.assertEqual(Exam.query.count(), 1)
         self.assertEqual(DataImport.query.one().status, "completed")
 
+        data_page = self.client.get("/data")
+        self.assertEqual(data_page.status_code, 200)
+        self.assertIn(b"Recently stored students", data_page.data)
+        self.assertIn(b"R001", data_page.data)
+        self.assertIn(b"Asha Rao", data_page.data)
+        self.assertIn(b"R002", data_page.data)
+        self.assertIn(b"students.csv", data_page.data)
+
     def test_real_import_rejects_rows_wider_than_header(self):
         csv_bytes = (
             b"ID,Class,Subject\n"

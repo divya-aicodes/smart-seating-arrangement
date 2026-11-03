@@ -88,10 +88,10 @@
                         </div>
                         <div class="field-group field-span-four">
                             <label for="real_csv_file">Student CSV</label>
-                            <label class="inline-file-control" for="real_csv_file">
-                                <input id="real_csv_file" type="file" name="csv_file" accept=".csv,text/csv" required data-file-input>
-                                <span>Choose file</span>
-                                <small data-file-name>No file selected</small>
+                            <label class="inline-file-control" for="real_csv_file" data-file-control>
+                                <input id="real_csv_file" type="file" name="csv_file" accept=".csv,text/csv" required aria-describedby="real_csv_file_status" data-file-input>
+                                <span data-file-action>Choose file</span>
+                                <small id="real_csv_file_status" data-file-name aria-live="polite">No file selected</small>
                             </label>
                         </div>
                     </div>
@@ -210,6 +210,30 @@
                     <tbody>{% for room in rooms %}<tr><td><strong>{{ room.building }} / {{ room.room_number }}</strong><small>{{ 'Floor ' ~ room.floor if room.floor else 'Floor not set' }}</small></td><td>{{ room.rows }} × {{ room.benches_per_row }} × {{ room.seats_per_bench }}</td><td>{{ room.capacity }}</td><td>{{ room.source_type | upper }}</td></tr>{% else %}<tr><td colspan="4"><div class="table-empty">No active rooms yet.</div></td></tr>{% endfor %}</tbody>
                 </table>
             </div>
+        </div>
+    </div>
+
+    <div class="record-panel reveal" id="stored-students">
+        <div class="record-panel-header"><div><h3>Recently stored students</h3><p>Actual database records from the latest imports and generated datasets</p></div><span class="count-chip">{{ recent_students | length }} shown</span></div>
+        <div class="table-wrap">
+            <table class="data-table" id="students-table">
+                <thead><tr><th>Student ID</th><th>Name</th><th>Class</th><th>Department</th><th>Source</th><th>Dataset</th><th>Access</th></tr></thead>
+                <tbody>
+                    {% for student in recent_students %}
+                    <tr>
+                        <td><code>{{ student.student_code }}</code></td>
+                        <td><strong>{{ student.full_name or 'Name not supplied' }}</strong></td>
+                        <td>{{ student.class_name }}</td>
+                        <td>{{ student.department or '—' }}</td>
+                        <td><span class="badge badge-{{ 'synthetic' if student.source_type == 'synthetic' else 'imported' }}">{{ student.source_type | upper }}</span></td>
+                        <td>{{ student.dataset.name if student.dataset else 'Unlinked' }}</td>
+                        <td><span class="status-text {{ 'text-warning' if student.accessibility_required else '' }}">{{ 'Accessible seat' if student.accessibility_required else 'Standard' }}</span></td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="7"><div class="table-empty">No student records are stored yet. Import a CSV or generate a synthetic dataset.</div></td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
     </div>
 

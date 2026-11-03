@@ -184,13 +184,13 @@
                 <div class="record-input-grid">
                     <div class="upload-panel">
                         <div class="input-method-label"><span>A</span> Upload a CSV file</div>
-                        <label class="file-drop" for="csv_file">
-                            <input id="csv_file" name="csv_file" type="file" accept=".csv,text/csv" data-file-input>
+                        <label class="file-drop" for="csv_file" data-file-control>
+                            <input id="csv_file" name="csv_file" type="file" accept=".csv,text/csv" aria-describedby="csv_file_status" data-file-input>
                             <span class="file-drop-icon" aria-hidden="true">
                                 <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
                             </span>
-                            <strong>Choose a student CSV</strong>
-                            <small data-file-name>No file selected</small>
+                            <strong data-file-action>Choose a student CSV</strong>
+                            <small id="csv_file_status" data-file-name aria-live="polite">No file selected</small>
                         </label>
                         <p class="schema-note"><strong>Accepted columns</strong> ID, Name, Class, Department, Subject_Code, Subject, Special_Needs</p>
                     </div>

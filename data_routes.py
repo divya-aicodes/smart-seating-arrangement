@@ -4,6 +4,7 @@ from datetime import date, datetime
 
 from flask import Blueprint, flash, redirect, render_template, request, url_for
 from sqlalchemy import func, select
+from sqlalchemy.orm import selectinload
 
 from data_service import (
     DataValidationError,
@@ -58,6 +59,12 @@ def data_management():
     imports = db.session.scalars(
         select(DataImport).order_by(DataImport.created_at.desc()).limit(20)
     ).all()
+    recent_students = db.session.scalars(
+        select(Student)
+        .options(selectinload(Student.dataset))
+        .order_by(Student.created_at.desc(), Student.id.desc())
+        .limit(50)
+    ).all()
     stats = {
         "datasets": db.session.scalar(select(func.count()).select_from(Dataset)),
         "students": db.session.scalar(select(func.count()).select_from(Student)),
@@ -70,6 +77,7 @@ def data_management():
         exams=exams,
         rooms=rooms,
         imports=imports,
+        recent_students=recent_students,
         stats=stats,
         today=date.today().isoformat(),
     )
