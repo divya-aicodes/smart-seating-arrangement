@@ -595,9 +595,14 @@ class DataImport(TimestampMixin, db.Model):
             "source_type IN ('real', 'synthetic')", name="ck_data_imports_source_type"
         ),
         CheckConstraint(
-            "status IN ('pending', 'processing', 'completed', 'failed')",
+            "status IN ('pending', 'processing', 'validated', 'committing', 'completed', 'failed', 'cancelled')",
             name="ck_data_imports_status",
         ),
+        CheckConstraint("total_rows >= 0", name="ck_data_imports_total_rows_nonnegative"),
+        CheckConstraint("processed_rows >= 0", name="ck_data_imports_processed_rows_nonnegative"),
+        CheckConstraint("valid_rows >= 0", name="ck_data_imports_valid_rows_nonnegative"),
+        CheckConstraint("invalid_rows >= 0", name="ck_data_imports_invalid_rows_nonnegative"),
+        CheckConstraint("chunk_size > 0", name="ck_data_imports_chunk_size_positive"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -611,12 +616,76 @@ class DataImport(TimestampMixin, db.Model):
     source_type: Mapped[str] = mapped_column(String(20), nullable=False)
     original_filename: Mapped[str | None] = mapped_column(String(255))
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    checksum_sha256: Mapped[str | None] = mapped_column(String(64), index=True)
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(64), unique=True, index=True
+    )
+    total_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    processed_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     valid_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     invalid_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    chunk_size: Mapped[int] = mapped_column(Integer, nullable=False, default=5_000)
+    import_options: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     error_report: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    committed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     institution: Mapped[Institution | None] = relationship(back_populates="imports")
     dataset: Mapped[Dataset | None] = relationship(back_populates="imports")
+    staged_students: Mapped[list[ImportStagingStudent]] = relationship(
+        back_populates="data_import", cascade="all, delete-orphan"
+    )
+    row_errors: Mapped[list[ImportRowError]] = relationship(
+        back_populates="data_import", cascade="all, delete-orphan"
+    )
+
+
+class ImportStagingStudent(TimestampMixin, db.Model):
+    __tablename__ = "import_staging_students"
+    __table_args__ = (
+        UniqueConstraint("data_import_id", "row_number", name="uq_import_staging_row"),
+        UniqueConstraint(
+            "data_import_id", "student_code_normalized",
+            name="uq_import_staging_student_code",
+        ),
+        Index("ix_import_staging_import_subject", "data_import_id", "subject_code"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    data_import_id: Mapped[int] = mapped_column(
+        ForeignKey("data_imports.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    row_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    student_code: Mapped[str] = mapped_column(String(64), nullable=False)
+    student_code_normalized: Mapped[str] = mapped_column(String(64), nullable=False)
+    full_name: Mapped[str | None] = mapped_column(String(150))
+    class_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    department_name: Mapped[str | None] = mapped_column(String(100))
+    subject_code: Mapped[str] = mapped_column(String(50), nullable=False)
+    subject_name: Mapped[str] = mapped_column(String(150), nullable=False)
+    accessibility_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    row_checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    data_import: Mapped[DataImport] = relationship(back_populates="staged_students")
+
+
+class ImportRowError(TimestampMixin, db.Model):
+    __tablename__ = "import_row_errors"
+    __table_args__ = (
+        Index("ix_import_row_errors_import_row", "data_import_id", "row_number"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    data_import_id: Mapped[int] = mapped_column(
+        ForeignKey("data_imports.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    row_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    error_code: Mapped[str] = mapped_column(String(80), nullable=False)
+    message: Mapped[str] = mapped_column(String(500), nullable=False)
+    raw_data: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+
+    data_import: Mapped[DataImport] = relationship(back_populates="row_errors")
 
 
 class AuditLog(db.Model):

@@ -110,6 +110,17 @@ def reject_untrusted_write_origins():
             abort(403, description="This request origin is not allowed.")
 
 
+@app.before_request
+def enforce_endpoint_request_limit():
+    """Reserve the larger request allowance for the staged CSV upload only."""
+    if (
+        request.content_length is not None
+        and request.content_length > MAX_UPLOAD_BYTES
+        and request.endpoint != "data.import_students"
+    ):
+        raise RequestEntityTooLarge()
+
+
 # Register CSRF after the origin guard so explicitly untrusted origins are rejected first.
 csrf.init_app(app)
 
@@ -550,6 +561,8 @@ def sample_csv():
 @app.route("/api/layout-recommendations", methods=["POST"])
 def layout_recommendations():
     """Validate temporary CSV data and return feasible room-layout choices."""
+    if request.content_length and request.content_length > MAX_UPLOAD_BYTES:
+        raise RequestEntityTooLarge()
     try:
         adjacency_rule = parse_choice(
             "adjacency_rule",
@@ -730,6 +743,8 @@ def assign():
     5. Propositional logic validation
     6. Combinatorial counting (Product Rule & PIE)
     """
+    if request.content_length and request.content_length > MAX_UPLOAD_BYTES:
+        raise RequestEntityTooLarge()
     try:
         data_mode = parse_choice(
             "data_mode", "manual", {"database", "manual"}, "data source"

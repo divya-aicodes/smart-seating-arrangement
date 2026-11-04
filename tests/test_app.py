@@ -7,14 +7,27 @@ import json
 import io
 import os
 import re
+from datetime import date, time
 from openpyxl import load_workbook
 from pypdf import PdfReader
+from werkzeug.datastructures import FileStorage
 
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
 from app import app, parse_csv_students, recommend_room_layouts, MAX_UPLOAD_BYTES
+from data_service import stage_student_import
 from extensions import db
-from models import AuditLog, DataImport, Dataset, Exam, Room, SeatingRun, Student
+from models import (
+    AuditLog,
+    DataImport,
+    Dataset,
+    Exam,
+    ImportRowError,
+    ImportStagingStudent,
+    Room,
+    SeatingRun,
+    Student,
+)
 
 
 class TestFlaskIntegration(unittest.TestCase):
@@ -81,6 +94,17 @@ class TestFlaskIntegration(unittest.TestCase):
             content_type="multipart/form-data",
         )
         self.assertEqual(res.status_code, 302)
+        self.assertEqual(Dataset.query.count(), 0)
+        self.assertEqual(Student.query.count(), 0)
+        staged = DataImport.query.one()
+        self.assertEqual(staged.status, "validated")
+        self.assertEqual(staged.processed_rows, 2)
+        self.assertEqual(staged.valid_rows, 2)
+        self.assertEqual(staged.invalid_rows, 0)
+        self.assertEqual(ImportStagingStudent.query.count(), 2)
+
+        committed = self.client.post(f"/data/imports/{staged.id}/commit")
+        self.assertEqual(committed.status_code, 302)
         dataset = Dataset.query.one()
         self.assertEqual(dataset.source_type, "real")
         self.assertEqual(Student.query.count(), 2)
@@ -117,6 +141,110 @@ class TestFlaskIntegration(unittest.TestCase):
         self.assertEqual(res.status_code, 302)
         self.assertEqual(Dataset.query.count(), 0)
         self.assertEqual(DataImport.query.one().status, "failed")
+        self.assertEqual(ImportRowError.query.count(), 1)
+
+    def test_staged_import_keeps_invalid_rows_visible_and_commits_only_after_confirmation(self):
+        csv_bytes = (
+            b"ID,Name,Class,Department,Subject_Code,Subject,Special_Needs\n"
+            b"R001,Asha Rao,CSE-A,CSE,DM101,Discrete Mathematics,N\n"
+            b"R002,Vikram Sen,CSE-B,CSE,DM101,Discrete Mathematics,MAYBE\n"
+        )
+        response = self.client.post(
+            "/data/import-students",
+            data={
+                "dataset_name": "Review Import",
+                "dataset_version": "v1",
+                "exam_date": "2026-12-01",
+                "start_time": "09:00",
+                "end_time": "12:00",
+                "session_name": "Morning",
+                "academic_year": "2026-27",
+                "csv_file": (io.BytesIO(csv_bytes), "review.csv"),
+            },
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(response.status_code, 302)
+        staged = DataImport.query.one()
+        self.assertEqual(staged.status, "validated")
+        self.assertEqual((staged.valid_rows, staged.invalid_rows), (1, 1))
+        self.assertEqual(Student.query.count(), 0)
+
+        status_response = self.client.get(f"/api/v1/imports/{staged.id}")
+        self.assertEqual(status_response.status_code, 200)
+        status_payload = status_response.get_json()["data"]
+        self.assertEqual(status_payload["progress_percentage"], 100.0)
+        self.assertEqual(status_payload["successful_rows"], 1)
+        self.assertEqual(status_payload["failed_rows"], 1)
+
+        api_errors = self.client.get(f"/api/v1/imports/{staged.id}/errors")
+        self.assertEqual(api_errors.status_code, 200)
+        api_error_payload = api_errors.get_json()
+        self.assertEqual(api_error_payload["pagination"]["total"], 1)
+        self.assertEqual(api_error_payload["data"][0]["raw_data"]["ID"], "R002")
+
+        error_report = self.client.get(f"/data/imports/{staged.id}/errors.csv")
+        self.assertEqual(error_report.status_code, 200)
+        self.assertIn(b"invalid_student_row", error_report.data)
+        self.assertIn(b"Special_Needs", error_report.data)
+
+        committed = self.client.post(f"/data/imports/{staged.id}/commit")
+        self.assertEqual(committed.status_code, 302)
+        self.assertEqual(Student.query.count(), 1)
+        self.assertEqual(DataImport.query.one().status, "completed")
+
+    def test_staged_import_is_idempotent_for_same_file_and_metadata(self):
+        csv_bytes = b"ID,Class,Subject\nR001,CSE-A,Discrete Mathematics\n"
+
+        def upload():
+            return self.client.post(
+                "/data/import-students",
+                data={
+                    "dataset_name": "Idempotent Import",
+                    "dataset_version": "v1",
+                    "exam_date": "2026-12-01",
+                    "start_time": "09:00",
+                    "end_time": "12:00",
+                    "session_name": "Morning",
+                    "academic_year": "2026-27",
+                    "csv_file": (io.BytesIO(csv_bytes), "students.csv"),
+                },
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(upload().status_code, 302)
+        self.assertEqual(upload().status_code, 302)
+        self.assertEqual(DataImport.query.count(), 1)
+        self.assertEqual(ImportStagingStudent.query.count(), 1)
+
+    def test_staged_import_persists_progress_across_configurable_chunks(self):
+        rows = "\n".join(
+            f"R{index:04d},CSE-{index % 4},Discrete Mathematics,N"
+            for index in range(1, 251)
+        )
+        upload = FileStorage(
+            stream=io.BytesIO(
+                ("ID,Class,Subject,Special_Needs\n" + rows).encode("utf-8")
+            ),
+            filename="chunked.csv",
+            content_type="text/csv",
+        )
+        staged, reused = stage_student_import(
+            upload,
+            dataset_name="Chunked Import",
+            dataset_version="v1",
+            exam_date=date(2026, 12, 1),
+            start_time=time(9, 0),
+            end_time=time(12, 0),
+            session_name="Morning",
+            academic_year="2026-27",
+            chunk_size=100,
+        )
+        self.assertFalse(reused)
+        self.assertEqual(staged.status, "validated")
+        self.assertEqual(staged.total_rows, 250)
+        self.assertEqual(staged.processed_rows, 250)
+        self.assertEqual(staged.valid_rows, 250)
+        self.assertEqual(ImportStagingStudent.query.count(), 250)
 
     def test_synthetic_generation_is_persisted_and_connected_to_frontend(self):
         res = self.client.post(

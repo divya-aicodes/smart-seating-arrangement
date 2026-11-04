@@ -514,10 +514,19 @@ STU-002,Rohan Sen,CSE-B,Computer Science,CS301,Algorithms,Y
 STU-003,Meera Das,ECE-A,Electronics,EC204,Signals,N
 ```
 
-The import limit is 2 MiB. Student identifiers currently remain globally unique
-to preserve backward compatibility until institution backfilling is complete.
-Rows wider than the header, invalid UTF-8, missing required values, and
-conflicting identifiers are rejected.
+Institutional imports use a staged workflow rather than writing directly into the
+operational tables. The server streams the CSV, validates it in configurable chunks
+(5,000 rows by default), stores valid rows and row-level errors separately, and shows a
+review summary before an administrator confirms the import. Confirmation creates the
+dataset, students, subjects, exam, and registrations in one transaction. Repeating the
+same file and import options reuses the existing checksum-backed import instead of
+duplicating rows.
+
+The application-level staging limit is 256 MiB and 500,000 rows. These limits describe
+input validation only; they are not a performance claim. Student identifiers currently
+remain globally unique to preserve backward compatibility until institution backfilling
+is complete. Rows wider than the header, invalid UTF-8, missing required values, and
+conflicting identifiers are rejected with a downloadable error report.
 
 ### Synthetic data
 
@@ -636,6 +645,8 @@ disconnected static-data demonstration layer.
 | `Invigilator` | Persisted staff identity and availability |
 | `InvigilatorAssignment` | Staff-to-room/exam assignment |
 | `DataImport` | Import provenance, counts, status, and validation messages |
+| `ImportStagingStudent` | Validated student rows awaiting explicit confirmation |
+| `ImportRowError` | Row number, stable error code, explanation, and bounded source values |
 | `AuditLog` | Operational action record |
 
 Important relationships:
@@ -654,7 +665,8 @@ Dataset
   |             +-- SeatingRuns -- SeatAllocations
   |-- Rooms -- Seats -----------^
   |-- Invigilators -- InvigilatorAssignments
-  +-- DataImports
+  +-- DataImports -- ImportStagingStudents
+                  +-- ImportRowErrors
 
 AuditLog records relevant actions across these resources.
 ```
@@ -674,7 +686,9 @@ The legacy class and department text fields remain available for backward compat
 | `GET` | `/sample-csv` | Download a header-only student import template |
 | `POST` | `/export-csv` | Export the current flat allocation table |
 | `GET` | `/data` | Manage datasets, imports, synthetic data, and rooms |
-| `POST` | `/data/import-students` | Persist a real CSV dataset and exam |
+| `POST` | `/data/import-students` | Stream, validate, and stage a real CSV import |
+| `POST` | `/data/imports/<id>/commit` | Confirm valid staged rows and persist operational records |
+| `GET` | `/data/imports/<id>/errors.csv` | Download the row-level validation error report |
 | `POST` | `/data/generate-synthetic` | Generate and persist a seeded dataset |
 | `POST` | `/data/rooms` | Create a room and its seats |
 | `GET` | `/reports` | View completed and published persisted runs |
@@ -693,6 +707,8 @@ The API root is `/api/v1`.
 | `GET` | `/api/v1` | API discovery |
 | `GET` | `/api/v1/health` | Health response |
 | `GET` | `/api/v1/openapi.json` | OpenAPI document |
+| `GET` | `/api/v1/imports/<id>` | Import status, counters, progress, and checksum |
+| `GET` | `/api/v1/imports/<id>/errors` | Paginated row-level import errors |
 | `GET` | `/api/v1/datasets` | Paginated dataset list with source filtering |
 | `GET` | `/api/v1/datasets/<id>` | Dataset detail |
 | `POST` | `/api/v1/datasets/synthetic` | Generate a persisted synthetic dataset |
@@ -755,7 +771,8 @@ For the same-origin Vercel deployment, leave `CORS_ALLOWED_ORIGINS` empty.
 - Secure, HTTP-only session cookie in production.
 - `SameSite=Lax` by default.
 - Exact production host allowlist.
-- 2 MiB request and upload limit.
+- 256 MiB application request limit for the staged institutional-import endpoint.
+- Separate 2 MiB limit for one-time manual planning uploads.
 - Maximum 5,000 students per manual planning run.
 - CSV formula-injection neutralization during export.
 - Parameter validation and bounded numeric inputs.
@@ -883,9 +900,9 @@ The fast suite covers:
 - handshaking, chromatic-polynomial, Product Rule, and inclusion-exclusion logic.
 
 GitHub Actions also runs a dedicated PostgreSQL 16 job. It applies every Alembic
-migration, checks model-to-migration drift with `flask db check`, and verifies the
-expected schema and transaction rollback against PostgreSQL. This integration check is
-kept separate from the fast SQLite suite.
+migration, checks model-to-migration drift with `flask db check`, verifies the expected
+schema and transaction rollback, and exercises the Psycopg `COPY` staging path against
+PostgreSQL. This integration check is kept separate from the fast SQLite suite.
 
 Compile the Python source:
 
@@ -905,6 +922,7 @@ Configure:
 APP_ENV=production
 SECRET_KEY=<at least 32 random characters>
 DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:5432/DATABASE
+IMPORT_CHUNK_SIZE=5000
 ALLOWED_HOSTS=smart-seating-arrangement-tan.vercel.app
 SESSION_COOKIE_SECURE=true
 SESSION_COOKIE_SAMESITE=Lax
@@ -937,6 +955,13 @@ Additional documentation:
 - Accessibility backtracking can become expensive on adversarial large inputs.
 - The full production graph's chromatic polynomial is not calculated.
 - Manual runs are not persisted as reportable seating runs.
+- Large imports currently run synchronously in the upload request. Background workers,
+  object storage, cancellation, and durable job progress belong to Phase 5.
+- The 100,000- and 500,000-row targets have not yet been benchmarked. The row cap must
+  not be interpreted as measured throughput or memory evidence.
+- Serverless hosts can impose request-body and execution-time limits below the
+  application limit; large institutional imports require a suitable long-running
+  deployment until background uploads are introduced.
 - Immediate invigilator names are placeholders; complete staff assignment uses
   the persisted invigilator model.
 - Durable production operation depends on PostgreSQL, migrations, backups,

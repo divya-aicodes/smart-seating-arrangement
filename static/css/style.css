@@ -320,9 +320,11 @@ code { padding: 0.12rem 0.3rem; background: var(--surface-alt); border: 1px soli
 .badge-danger { background: var(--red-soft); border-color: #dda9a5; color: var(--red); }
 .status-text { display: inline-flex; align-items: center; gap: 0.35rem; color: var(--ink-soft); font-size: 0.7rem; font-weight: 700; text-transform: capitalize; }
 .status-text::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #87959e; }
-.status-completed::before, .status-published::before, .status-active::before { background: var(--green); }
+.status-completed::before, .status-published::before, .status-active::before, .status-validated::before { background: var(--green); }
 .status-failed::before, .status-cancelled::before { background: var(--red); }
 .status-processing::before, .status-running::before { background: var(--blue); }
+.table-actions { display: flex; align-items: center; gap: 0.55rem; flex-wrap: wrap; }
+.table-actions form { margin: 0; }
 .report-toolbar { flex-wrap: wrap; }
 .table-search { width: min(280px, 100%); height: 40px; padding: 0 0.7rem; display: flex; align-items: center; gap: 0.5rem; background: #fff; border: 1px solid var(--line-strong); }
 .table-search svg { width: 17px; flex: 0 0 auto; fill: none; stroke: var(--muted); stroke-width: 1.5; stroke-linecap: round; }

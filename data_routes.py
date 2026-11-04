@@ -1,19 +1,33 @@
 """Server-rendered data-management routes for real and synthetic datasets."""
 
+import csv
+import io
+import json
 from datetime import date, datetime
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import (
+    Blueprint,
+    Response,
+    abort,
+    current_app,
+    flash,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from data_service import (
     DataValidationError,
+    commit_staged_student_import,
     create_room_with_seats,
     generate_synthetic_dataset,
-    import_real_exam_dataset,
+    stage_student_import,
 )
 from extensions import db
-from models import DataImport, Dataset, Exam, Room, Student
+from models import DataImport, Dataset, Exam, ImportRowError, Room, Student
 from security import record_audit
 
 
@@ -90,7 +104,7 @@ def import_students():
         flash("Select a CSV file to import.", "error")
         return redirect(url_for("data.data_management"))
     try:
-        dataset, exam, import_record = import_real_exam_dataset(
+        import_record, reused = stage_student_import(
             csv_file,
             dataset_name=request.form.get("dataset_name", ""),
             dataset_version=request.form.get("dataset_version", ""),
@@ -99,20 +113,34 @@ def import_students():
             end_time=_form_time("end_time", "End time"),
             session_name=request.form.get("session_name", ""),
             academic_year=request.form.get("academic_year", ""),
+            chunk_size=int(current_app.config["IMPORT_CHUNK_SIZE"]),
         )
-        flash(
-            f"Imported {import_record.valid_rows} real student records into "
-            f"'{dataset.name}' and created exam session #{exam.id}.",
-            "success",
-        )
+        if reused:
+            flash(
+                f"This exact upload was already staged as import #{import_record.id}. "
+                "Its existing validation result was reused safely.",
+                "info",
+            )
+        elif import_record.status == "validated":
+            flash(
+                f"Import #{import_record.id} validated {import_record.valid_rows:,} rows; "
+                f"{import_record.invalid_rows:,} rows need review. Confirm the import below "
+                "before operational records are created.",
+                "success",
+            )
+        else:
+            flash(
+                f"Import #{import_record.id} contains no valid rows. Download its error report.",
+                "error",
+            )
         record_audit(
-            "real_dataset_imported",
-            "dataset",
-            dataset.id,
+            "real_dataset_import_staged",
+            "data_import",
+            import_record.id,
             after_values={
-                "exam_id": exam.id,
-                "import_id": import_record.id,
                 "valid_rows": import_record.valid_rows,
+                "invalid_rows": import_record.invalid_rows,
+                "reused": reused,
             },
         )
     except DataValidationError as exc:
@@ -124,6 +152,72 @@ def import_students():
         )
         flash(str(exc), "error")
     return redirect(url_for("data.data_management"))
+
+
+@data_bp.post("/data/imports/<int:import_id>/commit")
+def commit_import(import_id: int):
+    try:
+        dataset, exam, import_record = commit_staged_student_import(import_id)
+        flash(
+            f"Committed {import_record.valid_rows:,} verified rows to '{dataset.name}' "
+            f"and created exam session #{exam.id}. "
+            f"{import_record.invalid_rows:,} invalid rows remain in the error report.",
+            "success",
+        )
+        record_audit(
+            "real_dataset_import_committed",
+            "data_import",
+            import_record.id,
+            after_values={
+                "dataset_id": dataset.id,
+                "exam_id": exam.id,
+                "valid_rows": import_record.valid_rows,
+                "invalid_rows": import_record.invalid_rows,
+            },
+        )
+    except DataValidationError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("data.data_management"))
+
+
+def _safe_csv_cell(value):
+    text = str(value if value is not None else "")
+    return f"'{text}" if text.startswith(("=", "+", "-", "@")) else text
+
+
+@data_bp.get("/data/imports/<int:import_id>/errors.csv")
+def import_errors(import_id: int):
+    import_record = db.session.get(DataImport, import_id)
+    if import_record is None:
+        abort(404, description="The requested import does not exist.")
+    errors = db.session.scalars(
+        select(ImportRowError)
+        .where(ImportRowError.data_import_id == import_id)
+        .order_by(ImportRowError.row_number, ImportRowError.id)
+    )
+    output = io.StringIO(newline="")
+    writer = csv.writer(output)
+    writer.writerow(["Row", "Error Code", "Explanation", "Original Values"])
+    for item in errors:
+        writer.writerow([
+            item.row_number,
+            _safe_csv_cell(item.error_code),
+            _safe_csv_cell(item.message),
+            _safe_csv_cell(json.dumps(item.raw_data or {}, ensure_ascii=False, sort_keys=True)),
+        ])
+    record_audit(
+        "import_error_report_downloaded",
+        "data_import",
+        import_id,
+        after_values={"invalid_rows": import_record.invalid_rows},
+    )
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition": f"attachment;filename=seatplan-import-{import_id}-errors.csv"
+        },
+    )
 
 
 @data_bp.post("/data/generate-synthetic")

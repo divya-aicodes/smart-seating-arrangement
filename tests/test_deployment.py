@@ -66,6 +66,17 @@ class TestDeploymentConfiguration(unittest.TestCase):
         self.assertEqual(config["SQLALCHEMY_ENGINE_OPTIONS"]["pool_size"], 5)
         self.assertTrue(config["IS_PRODUCTION"])
 
+    def test_import_chunk_size_is_bounded_and_configurable(self):
+        self.assertEqual(load_app_config({})["IMPORT_CHUNK_SIZE"], 5_000)
+        self.assertEqual(
+            load_app_config({"IMPORT_CHUNK_SIZE": "1200"})["IMPORT_CHUNK_SIZE"],
+            1_200,
+        )
+        with self.assertRaises(RuntimeError):
+            load_app_config({"IMPORT_CHUNK_SIZE": "99"})
+        with self.assertRaises(RuntimeError):
+            load_app_config({"IMPORT_CHUNK_SIZE": "not-a-number"})
+
     def test_structured_log_formatter_emits_json(self):
         record = logging.LogRecord(
             "seatplan.test", logging.INFO, __file__, 1, "configuration ready", (), None

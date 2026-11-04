@@ -14,8 +14,10 @@ from database_service import PersistenceError, publish_seating_run
 from extensions import db
 from models import (
     Dataset,
+    DataImport,
     Exam,
     ExamRegistration,
+    ImportRowError,
     Room,
     Seat,
     SeatAllocation,
@@ -174,6 +176,31 @@ def _run_json(run: SeatingRun, *, allocation_count: int | None = None) -> dict[s
     return payload
 
 
+def _import_json(item: DataImport) -> dict[str, Any]:
+    progress = (
+        round(item.processed_rows * 100 / item.total_rows, 2)
+        if item.total_rows else 0.0
+    )
+    return {
+        "id": item.id,
+        "dataset_id": item.dataset_id,
+        "import_type": item.import_type,
+        "source_type": item.source_type,
+        "original_filename": item.original_filename,
+        "status": item.status,
+        "total_rows": item.total_rows,
+        "processed_rows": item.processed_rows,
+        "successful_rows": item.valid_rows,
+        "failed_rows": item.invalid_rows,
+        "progress_percentage": progress,
+        "chunk_size": item.chunk_size,
+        "checksum_sha256": item.checksum_sha256,
+        "created_at": _iso(item.created_at),
+        "updated_at": _iso(item.updated_at),
+        "committed_at": _iso(item.committed_at),
+    }
+
+
 def _json_body():
     if not request.is_json:
         return None, _error(
@@ -237,6 +264,12 @@ def openapi_document():
             "/datasets/synthetic": {
                 "post": {"summary": "Generate and persist a deterministic synthetic dataset"}
             },
+            "/imports/{import_id}": {
+                "get": {"summary": "Get staged import status and progress"}
+            },
+            "/imports/{import_id}/errors": {
+                "get": {"summary": "List row-level import errors"}
+            },
             "/exams": {"get": {"summary": "List persisted exams"}},
             "/exams/{exam_id}": {"get": {"summary": "Get a persisted exam"}},
             "/rooms": {"get": {"summary": "List persisted rooms"}},
@@ -251,6 +284,34 @@ def openapi_document():
             },
         },
     })
+
+
+@api_bp.get("/imports/<int:import_id>")
+def import_detail(import_id: int):
+    item = db.session.get(DataImport, import_id)
+    if item is None:
+        return _error("not_found", "The requested import does not exist.", 404)
+    return jsonify({"data": _import_json(item)})
+
+
+@api_bp.get("/imports/<int:import_id>/errors")
+def import_error_list(import_id: int):
+    if db.session.get(DataImport, import_id) is None:
+        return _error("not_found", "The requested import does not exist.", 404)
+    statement = (
+        select(ImportRowError)
+        .where(ImportRowError.data_import_id == import_id)
+        .order_by(ImportRowError.row_number, ImportRowError.id)
+    )
+    return _page_response(
+        statement,
+        lambda item: {
+            "row_number": item.row_number,
+            "error_code": item.error_code,
+            "message": item.message,
+            "raw_data": item.raw_data or {},
+        },
+    )
 
 
 @api_bp.get("/datasets")

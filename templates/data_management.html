@@ -51,7 +51,7 @@
         <details class="operation-card reveal" open>
             <summary>
                 <span class="operation-number">01</span>
-                <span class="operation-title"><strong>Import institutional records</strong><small>Create a real dataset, student records, subjects, registrations and an exam session in one transaction.</small></span>
+                <span class="operation-title"><strong>Import institutional records</strong><small>Validate into protected staging first, review row errors, then explicitly commit verified records.</small></span>
                 <span class="summary-control" aria-hidden="true"></span>
             </summary>
             <div class="operation-body">
@@ -89,15 +89,15 @@
                         <div class="field-group field-span-four">
                             <label for="real_csv_file">Student CSV</label>
                             <label class="inline-file-control" for="real_csv_file" data-file-control>
-                                <input id="real_csv_file" type="file" name="csv_file" accept=".csv,text/csv" required aria-describedby="real_csv_file_status" data-file-input>
+                                <input id="real_csv_file" type="file" name="csv_file" accept=".csv,text/csv" required aria-describedby="real_csv_file_status" data-file-input data-max-file-bytes="268435456">
                                 <span data-file-action>Choose file</span>
                                 <small id="real_csv_file_status" data-file-name aria-live="polite">No file selected</small>
                             </label>
                         </div>
                     </div>
                     <div class="form-footer">
-                        <p>All rows must pass validation; partial imports are not committed.</p>
-                        <button class="button button-primary" type="submit">Import and validate</button>
+                        <p>The upload is checksum-protected and processed in 5,000-row chunks. No operational student data is created until confirmation.</p>
+                        <button class="button button-primary" type="submit">Upload and validate</button>
                     </div>
                 </form>
             </div>
@@ -241,8 +241,34 @@
         <div class="record-panel-header"><div><h3>Import history</h3><p>Most recent validation outcomes</p></div><span class="count-chip">{{ imports | length }} shown</span></div>
         <div class="table-wrap">
             <table class="data-table">
-                <thead><tr><th>Type</th><th>Source</th><th>Status</th><th>Valid rows</th><th>Invalid rows</th><th>File</th></tr></thead>
-                <tbody>{% for item in imports %}<tr><td>{{ item.import_type }}</td><td>{{ item.source_type }}</td><td><span class="status-text status-{{ item.status }}">{{ item.status }}</span></td><td>{{ item.valid_rows }}</td><td>{{ item.invalid_rows }}</td><td>{{ item.original_filename or 'Generated internally' }}</td></tr>{% else %}<tr><td colspan="6"><div class="table-empty">No imports recorded yet.</div></td></tr>{% endfor %}</tbody>
+                <thead><tr><th>Type</th><th>Status</th><th>Progress</th><th>Valid</th><th>Failed</th><th>File</th><th>Actions</th></tr></thead>
+                <tbody>
+                    {% for item in imports %}
+                    <tr>
+                        <td>{{ item.import_type }}<small>{{ item.source_type }}</small></td>
+                        <td><span class="status-text status-{{ item.status }}">{{ item.status }}</span></td>
+                        <td>{{ item.processed_rows }} / {{ item.total_rows }}<small>{{ ((item.processed_rows * 100 / item.total_rows) | round(1)) if item.total_rows else 0 }}%</small></td>
+                        <td>{{ item.valid_rows }}</td>
+                        <td>{{ item.invalid_rows }}</td>
+                        <td>{{ item.original_filename or 'Generated internally' }}</td>
+                        <td>
+                            <div class="table-actions">
+                                {% if item.invalid_rows %}
+                                <a class="text-link" href="{{ url_for('data.import_errors', import_id=item.id) }}">Error report</a>
+                                {% endif %}
+                                {% if item.status in ['validated', 'committing'] and item.valid_rows %}
+                                <form action="{{ url_for('data.commit_import', import_id=item.id) }}" method="POST">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <button class="button button-secondary button-small" type="submit">Confirm {{ item.valid_rows }} valid rows</button>
+                                </form>
+                                {% elif item.status == 'completed' and item.dataset %}
+                                <span class="status-text">{{ item.dataset.name }}</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}<tr><td colspan="7"><div class="table-empty">No imports recorded yet.</div></td></tr>{% endfor %}
+                </tbody>
             </table>
         </div>
     </div>

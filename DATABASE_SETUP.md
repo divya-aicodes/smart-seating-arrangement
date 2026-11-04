@@ -55,12 +55,39 @@ invent an institution, infer a student's section, or rewrite existing rows. A la
 reviewed backfill must establish verified ownership before those links can become
 mandatory or replace legacy text fields.
 
-## Phase 3 data workflow
+## Staged CSV imports
+
+Migration `c2d4e6f8a913` extends import tracking and adds
+`import_staging_students` and `import_row_errors`. It preserves existing import rows,
+backfills their counters, and does not create or alter operational student records.
+
+The institutional CSV workflow is:
+
+1. Stream and hash the upload instead of loading the entire file into memory.
+2. Validate UTF-8, headers, identifiers, academic text, and subject values.
+3. Store valid rows and row-level errors in 5,000-row chunks. PostgreSQL uses Psycopg 3
+   `COPY`; SQLite uses batched inserts for local development and tests.
+4. Review totals and download the error report when any row fails.
+5. Explicitly confirm the valid rows. The operational dataset, students, subjects, exam,
+   and registrations are then committed transactionally.
+
+The same file and import options produce the same idempotency key, so a retry reuses the
+existing import. A failed operational commit leaves staged rows available for a safe
+retry. The current 256 MiB and 500,000-row limits are safety bounds, not benchmark
+results.
+
+Set `IMPORT_CHUNK_SIZE` to a value from 100 through 20,000 to tune chunking for a
+measured deployment. The default is 5,000; change it only after representative import
+benchmarks.
+
+## Data workflow
 
 1. Open `/data` after applying migrations.
 2. For institutional data, upload a UTF-8 CSV using the downloadable header-only
-   template. The import creates a versioned real dataset, students, subjects, an exam,
-   and eligible exam registrations. No example students are inserted automatically.
+   template. Review the staged validation result, download any error report, and confirm
+   the valid rows. Only confirmation creates a versioned real dataset, students,
+   subjects, an exam, and eligible exam registrations. No example students are inserted
+   automatically.
 3. Create one or more physical rooms for that same dataset. Every seat is stored in the
    database with its row, bench, seat number, active status, and accessibility flag.
 4. Alternatively, generate an explicitly labelled synthetic dataset. The supplied seed
@@ -120,6 +147,7 @@ and secure session cookies. The repository includes a non-root Docker image, a
 PostgreSQL Compose stack, and GitHub Actions checks; these are deployment tooling, not
 evidence that a live environment, backups, TLS, or monitoring have been configured.
 
-The CI PostgreSQL job applies the complete migration chain, runs `flask db check`, and
-executes a rollback smoke test. Local unit tests continue to use SQLite for speed; they
-must not be treated as proof that a new migration works on PostgreSQL.
+The CI PostgreSQL job applies the complete migration chain, runs `flask db check`,
+executes a rollback smoke test, and stages valid and invalid rows through the PostgreSQL
+`COPY` implementation. Local unit tests continue to use SQLite for speed; they must not
+be treated as proof that a new migration works on PostgreSQL.

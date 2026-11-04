@@ -26,6 +26,8 @@ The API index is available at `/api/v1`, its machine-readable contract at
 | GET | `/datasets` | public | List persisted real or synthetic datasets |
 | GET | `/datasets/{id}` | public | Dataset details and persisted counts |
 | POST | `/datasets/synthetic` | public + CSRF | Generate deterministic synthetic records |
+| GET | `/imports/{id}` | public | Read staged-import status, counters, and progress |
+| GET | `/imports/{id}/errors` | public | Read paginated row-level validation errors |
 | GET | `/exams`, `/exams/{id}` | public | Read persisted exam data |
 | GET | `/rooms`, `/rooms/{id}` | public | Read persisted room and seat-capacity data |
 | GET | `/seating-runs`, `/seating-runs/{id}` | public | Read persisted optimizer runs |
@@ -35,6 +37,20 @@ The API index is available at `/api/v1`, its machine-readable contract at
 Because authentication has been removed, persisted student allocation data is available
 to anyone who can reach the deployment. Deploy only on a trusted network unless another
 access-control layer is placed in front of the application.
+
+## Import status
+
+`GET /api/v1/imports/{id}` returns the durable state of one staged import. Important
+fields include `status`, `total_rows`, `processed_rows`, `valid_rows`, `invalid_rows`,
+`progress_percentage`, `checksum_sha256`, `chunk_size`, and timestamps. Expected status
+values are `pending`, `processing`, `validated`, `committing`, `completed`, `failed`,
+and `cancelled`.
+
+`GET /api/v1/imports/{id}/errors?page=1&per_page=50` returns the standard paginated
+collection shape. Each item contains `row_number`, `error_code`, `message`, and bounded
+`raw_data`. The browser workflow also offers the same diagnostics as a formula-safe CSV
+download. Import creation and confirmation currently remain CSRF-protected web actions;
+the versioned write endpoints are planned for the API-security phase.
 
 ## Synthetic dataset request
 

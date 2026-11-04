@@ -327,8 +327,9 @@ function initFileInputs() {
                 showFilePreviewError(preview, message);
                 return;
             }
-            if (file.size > 2 * 1024 * 1024) {
-                const message = "This file is larger than the 2 MiB upload limit.";
+            const maxFileBytes = Number.parseInt(input.dataset.maxFileBytes || "2097152", 10);
+            if (file.size > maxFileBytes) {
+                const message = `This file is larger than the ${formatFileSize(maxFileBytes)} upload limit.`;
                 input.setCustomValidity(message);
                 showFilePreviewError(preview, message);
                 return;
@@ -396,7 +397,9 @@ function showFilePreviewError(preview, message) {
 
 async function renderCsvPreview(input, file, preview) {
     try {
-        const text = (await file.text()).replace(/^\uFEFF/, "");
+        const previewLimit = 256 * 1024;
+        const truncated = file.size > previewLimit;
+        const text = (await file.slice(0, previewLimit).text()).replace(/^\uFEFF/, "");
         if (input.files?.[0] !== file) return;
 
         const rows = parseCsvPreviewRows(text).filter(row => row.some(cell => cell.trim()));
@@ -436,8 +439,12 @@ async function renderCsvPreview(input, file, preview) {
         preview.hidden = false;
         preview.classList.remove("has-error");
         preview.querySelector("[data-csv-preview-title]").textContent = "CSV ready to upload";
-        preview.querySelector("[data-csv-preview-meta]").textContent = `${records.length} data ${records.length === 1 ? "row" : "rows"} · ${header.length} ${header.length === 1 ? "column" : "columns"}`;
-        preview.querySelector("[data-csv-preview-message]").textContent = records.length > 5
+        preview.querySelector("[data-csv-preview-meta]").textContent = truncated
+            ? `Sample preview · ${header.length} ${header.length === 1 ? "column" : "columns"}`
+            : `${records.length} data ${records.length === 1 ? "row" : "rows"} · ${header.length} ${header.length === 1 ? "column" : "columns"}`;
+        preview.querySelector("[data-csv-preview-message]").textContent = truncated
+            ? "Showing the first 5 sampled rows without loading the complete file into browser memory. The server validates every row."
+            : records.length > 5
             ? `Showing the first 5 of ${records.length} rows. The server validates every row.`
             : "Preview complete. The server validates every row before saving.";
     } catch (error) {

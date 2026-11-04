@@ -119,6 +119,8 @@ class TestDatabasePersistence(unittest.TestCase):
             "exam_registrations",
             "exams",
             "institutions",
+            "import_row_errors",
+            "import_staging_students",
             "invigilator_assignments",
             "invigilators",
             "rooms",

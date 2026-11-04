@@ -5,13 +5,14 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import json
 import math
 import random
 import re
-from datetime import date, time
+from datetime import date, datetime, time, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
 
 from extensions import db
@@ -20,6 +21,8 @@ from models import (
     Dataset,
     Exam,
     ExamRegistration,
+    ImportRowError,
+    ImportStagingStudent,
     Invigilator,
     Room,
     Seat,
@@ -30,6 +33,9 @@ from models import (
 
 MAX_IMPORT_BYTES = 2 * 1024 * 1024
 MAX_IMPORT_ROWS = 5_000
+MAX_BULK_IMPORT_BYTES = 256 * 1024 * 1024
+MAX_BULK_IMPORT_ROWS = 500_000
+DEFAULT_IMPORT_CHUNK_SIZE = 5_000
 
 
 class DataValidationError(ValueError):
@@ -167,6 +173,466 @@ def parse_student_import(file_storage) -> list[dict[str, Any]]:
     return rows
 
 
+def _upload_checksum(file_storage) -> tuple[str, int]:
+    stream = getattr(file_storage, "stream", file_storage)
+    if not hasattr(stream, "seek"):
+        raise DataValidationError("The uploaded CSV stream must support safe retry processing.")
+    stream.seek(0)
+    digest = hashlib.sha256()
+    total_bytes = 0
+    while True:
+        chunk = stream.read(1024 * 1024)
+        if not chunk:
+            break
+        if not isinstance(chunk, bytes):
+            raise DataValidationError("The uploaded CSV could not be read as bytes.")
+        total_bytes += len(chunk)
+        if total_bytes > MAX_BULK_IMPORT_BYTES:
+            raise DataValidationError("The uploaded CSV exceeds the 256 MiB bulk-import limit.")
+        digest.update(chunk)
+    stream.seek(0)
+    return digest.hexdigest(), total_bytes
+
+
+def _safe_raw_row(raw_row: dict[str | None, Any]) -> dict[str, str]:
+    """Bound row-level diagnostic data so malformed input cannot inflate error storage."""
+    return {
+        str(key if key is not None else "extra_values")[:100]: str(value or "")[:500]
+        for key, value in raw_row.items()
+    }
+
+
+def _normalize_staging_row(
+    raw_row: dict[str | None, Any],
+    headers: dict[str, str],
+    line_number: int,
+    seen_ids: set[str],
+) -> dict[str, Any]:
+    if None in raw_row:
+        raise DataValidationError("The row contains more values than the CSV header.")
+    student_code = _limited(
+        raw_row.get(headers["id"], ""), "Student ID", 64, required=True
+    )
+    normalized_id = student_code.casefold()
+    if normalized_id in seen_ids:
+        raise DataValidationError(f"Duplicate student ID '{student_code}' in this file.")
+    seen_ids.add(normalized_id)
+
+    class_name = _limited(
+        raw_row.get(headers["class"], ""), "Class", 100, required=True
+    )
+    subject_name = _limited(
+        raw_row.get(headers["subject"], ""), "Subject", 150, required=True
+    )
+    true_values = {"Y", "YES", "TRUE", "1", "T"}
+    false_values = {"", "N", "NO", "FALSE", "0", "F"}
+    special_raw = raw_row.get(headers.get("special_needs", ""), "").strip().upper()
+    if special_raw not in true_values | false_values:
+        raise DataValidationError("Special_Needs must be Y/N, True/False, or 1/0.")
+
+    department_name = _limited(
+        raw_row.get(headers.get("department", ""), ""), "Department", 100
+    ) or None
+    full_name = _limited(
+        raw_row.get(headers.get("name", ""), ""), "Name", 150
+    ) or None
+    subject_code = _subject_code(
+        raw_row.get(headers.get("subject_code", ""), ""), subject_name
+    )
+    canonical = {
+        "student_code": student_code,
+        "student_code_normalized": normalized_id,
+        "full_name": full_name,
+        "class_name": class_name,
+        "department_name": department_name,
+        "subject_code": subject_code,
+        "subject_name": subject_name,
+        "accessibility_required": special_raw in true_values,
+    }
+    canonical["row_checksum"] = hashlib.sha256(
+        json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    canonical["row_number"] = line_number
+    return canonical
+
+
+def _flush_staging_batches(
+    import_record: DataImport,
+    valid_batch: list[dict[str, Any]],
+    error_batch: list[dict[str, Any]],
+) -> None:
+    if db.session.get_bind().dialect.name == "postgresql":
+        raw_connection = db.session.connection().connection.driver_connection
+        now = datetime.now(timezone.utc)
+        if valid_batch:
+            columns = (
+                "data_import_id", "row_number", "student_code",
+                "student_code_normalized", "full_name", "class_name",
+                "department_name", "subject_code", "subject_name",
+                "accessibility_required", "row_checksum", "created_at", "updated_at",
+            )
+            with raw_connection.cursor() as cursor:
+                with cursor.copy(
+                    f"COPY import_staging_students ({', '.join(columns)}) FROM STDIN"
+                ) as copy:
+                    for row in valid_batch:
+                        copy.write_row(tuple(row.get(column) for column in columns[:-2]) + (now, now))
+        if error_batch:
+            columns = (
+                "data_import_id", "row_number", "error_code", "message",
+                "raw_data", "created_at", "updated_at",
+            )
+            with raw_connection.cursor() as cursor:
+                with cursor.copy(
+                    f"COPY import_row_errors ({', '.join(columns)}) FROM STDIN"
+                ) as copy:
+                    for row in error_batch:
+                        copy.write_row((
+                            row["data_import_id"],
+                            row["row_number"],
+                            row["error_code"],
+                            row["message"],
+                            json.dumps(row.get("raw_data") or {}, ensure_ascii=False),
+                            now,
+                            now,
+                        ))
+    else:
+        if valid_batch:
+            db.session.execute(insert(ImportStagingStudent), valid_batch)
+        if error_batch:
+            db.session.execute(insert(ImportRowError), error_batch)
+    import_record.valid_rows += len(valid_batch)
+    import_record.invalid_rows += len(error_batch)
+    import_record.processed_rows += len(valid_batch) + len(error_batch)
+    db.session.commit()
+    valid_batch.clear()
+    error_batch.clear()
+
+
+def stage_student_import(
+    file_storage,
+    *,
+    dataset_name: str,
+    dataset_version: str,
+    exam_date: date,
+    start_time: time,
+    end_time: time,
+    session_name: str,
+    academic_year: str,
+    chunk_size: int = DEFAULT_IMPORT_CHUNK_SIZE,
+) -> tuple[DataImport, bool]:
+    """Stream, validate, and persist CSV rows without touching operational student data."""
+    original_filename = (getattr(file_storage, "filename", None) or "students.csv")[:255]
+    if not original_filename.casefold().endswith(".csv"):
+        raise DataValidationError("Choose a file with the .csv extension.")
+    if not 100 <= chunk_size <= 20_000:
+        raise DataValidationError("Import chunk size must be between 100 and 20,000 rows.")
+    dataset_name = _limited(dataset_name, "Dataset name", 150, required=True)
+    dataset_version = _limited(dataset_version, "Dataset version", 50, required=True)
+    session_name = _limited(session_name, "Session name", 80, required=True)
+    academic_year = _limited(academic_year, "Academic year", 20, required=True)
+    if end_time <= start_time:
+        raise DataValidationError("Exam end time must be later than start time.")
+
+    checksum, _total_bytes = _upload_checksum(file_storage)
+    options = {
+        "dataset_name": dataset_name,
+        "dataset_version": dataset_version,
+        "exam_date": exam_date.isoformat(),
+        "start_time": start_time.isoformat(),
+        "end_time": end_time.isoformat(),
+        "session_name": session_name,
+        "academic_year": academic_year,
+    }
+    idempotency_key = hashlib.sha256(
+        (checksum + json.dumps(options, sort_keys=True, separators=(",", ":"))).encode("utf-8")
+    ).hexdigest()
+    existing = db.session.scalar(
+        select(DataImport).where(DataImport.idempotency_key == idempotency_key)
+    )
+    if existing is not None:
+        return existing, True
+
+    import_record = DataImport(
+        import_type="students",
+        source_type="real",
+        original_filename=original_filename,
+        status="processing",
+        checksum_sha256=checksum,
+        idempotency_key=idempotency_key,
+        total_rows=0,
+        processed_rows=0,
+        valid_rows=0,
+        invalid_rows=0,
+        chunk_size=chunk_size,
+        import_options=options,
+    )
+    db.session.add(import_record)
+    try:
+        db.session.commit()
+    except IntegrityError as exc:
+        db.session.rollback()
+        existing = db.session.scalar(
+            select(DataImport).where(DataImport.idempotency_key == idempotency_key)
+        )
+        if existing is not None:
+            return existing, True
+        raise DataValidationError("The import could not be initialized safely.") from exc
+
+    valid_batch: list[dict[str, Any]] = []
+    error_batch: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    text_stream = None
+    try:
+        binary_stream = getattr(file_storage, "stream", file_storage)
+        binary_stream.seek(0)
+        text_stream = io.TextIOWrapper(binary_stream, encoding="utf-8-sig", newline="")
+        reader = csv.DictReader(text_stream)
+        headers = _normalized_headers(reader.fieldnames)
+        if not {"id", "class", "subject"}.issubset(headers):
+            raise DataValidationError(
+                "CSV headers must include ID, Class, and Subject. Name, Department, "
+                "Subject_Code, and Special_Needs are optional."
+            )
+
+        for line_number, raw_row in enumerate(reader, start=2):
+            if not any(str(value or "").strip() for value in raw_row.values()):
+                continue
+            import_record.total_rows += 1
+            if import_record.total_rows > MAX_BULK_IMPORT_ROWS:
+                raise DataValidationError(
+                    f"A maximum of {MAX_BULK_IMPORT_ROWS:,} rows can be staged at once."
+                )
+            try:
+                normalized = _normalize_staging_row(
+                    raw_row, headers, line_number, seen_ids
+                )
+                normalized["data_import_id"] = import_record.id
+                valid_batch.append(normalized)
+            except DataValidationError as exc:
+                error_batch.append({
+                    "data_import_id": import_record.id,
+                    "row_number": line_number,
+                    "error_code": "invalid_student_row",
+                    "message": str(exc)[:500],
+                    "raw_data": _safe_raw_row(raw_row),
+                })
+
+            if len(valid_batch) + len(error_batch) >= chunk_size:
+                _flush_staging_batches(import_record, valid_batch, error_batch)
+
+        _flush_staging_batches(import_record, valid_batch, error_batch)
+        if import_record.total_rows == 0:
+            raise DataValidationError("The CSV does not contain any student records.")
+        import_record.status = "validated" if import_record.valid_rows else "failed"
+        import_record.error_report = {
+            "message": (
+                "Validation completed. Review row errors before committing valid records."
+                if import_record.invalid_rows
+                else "Validation completed with no row errors."
+            )
+        }
+        db.session.commit()
+        return import_record, False
+    except UnicodeDecodeError as exc:
+        _record_failed_import(import_record.id, "The uploaded CSV must be UTF-8 encoded.")
+        raise DataValidationError("The uploaded CSV must be UTF-8 encoded.") from exc
+    except csv.Error as exc:
+        message = f"Malformed CSV: {exc}"
+        _record_failed_import(import_record.id, message)
+        raise DataValidationError(message) from exc
+    except DataValidationError as exc:
+        _record_failed_import(import_record.id, str(exc))
+        raise
+    except Exception:
+        _record_failed_import(import_record.id, "Unexpected staging failure")
+        raise
+    finally:
+        if text_stream is not None:
+            try:
+                text_stream.detach()
+            except (ValueError, OSError):
+                pass
+
+
+def _staging_chunks(import_id: int, chunk_size: int):
+    """Read bounded keyset pages so writes do not share an open server-side cursor."""
+    last_row_number = 0
+    while True:
+        chunk = db.session.scalars(
+            select(ImportStagingStudent)
+            .where(
+                ImportStagingStudent.data_import_id == import_id,
+                ImportStagingStudent.row_number > last_row_number,
+            )
+            .order_by(ImportStagingStudent.row_number)
+            .limit(chunk_size)
+        ).all()
+        if not chunk:
+            return
+        yield chunk
+        last_row_number = chunk[-1].row_number
+
+
+def commit_staged_student_import(import_id: int) -> tuple[Dataset, Exam, DataImport]:
+    """Commit valid staged rows to operational tables in one database transaction."""
+    import_record = db.session.get(DataImport, import_id)
+    if import_record is None:
+        raise DataValidationError("The selected import does not exist.")
+    if import_record.status == "completed" and import_record.dataset is not None:
+        exam = db.session.scalar(
+            select(Exam).where(Exam.dataset_id == import_record.dataset_id)
+        )
+        if exam is None:
+            raise DataValidationError("The completed import has no linked exam.")
+        return import_record.dataset, exam, import_record
+    if import_record.status not in {"validated", "committing"}:
+        raise DataValidationError("Only a validated import can be committed.")
+    if import_record.valid_rows < 1:
+        raise DataValidationError("The import contains no valid student records.")
+
+    options = import_record.import_options or {}
+    required_options = {
+        "dataset_name", "dataset_version", "exam_date", "start_time", "end_time",
+        "session_name", "academic_year",
+    }
+    if not required_options.issubset(options):
+        raise DataValidationError("The staged import metadata is incomplete.")
+    if db.session.scalar(
+        select(Dataset).where(
+            Dataset.name == options["dataset_name"],
+            Dataset.version == options["dataset_version"],
+        )
+    ):
+        raise DataValidationError("A dataset with this name and version already exists.")
+
+    import_record.status = "committing"
+    db.session.commit()
+    try:
+        dataset = Dataset(
+            name=options["dataset_name"],
+            version=options["dataset_version"],
+            source_type="real",
+            description=f"Imported from {import_record.original_filename or 'students.csv'}",
+            status="active",
+        )
+        db.session.add(dataset)
+        db.session.flush()
+
+        subject_rows = db.session.execute(
+            select(
+                ImportStagingStudent.subject_code,
+                ImportStagingStudent.subject_name,
+                ImportStagingStudent.department_name,
+            )
+            .where(ImportStagingStudent.data_import_id == import_id)
+            .distinct()
+        ).all()
+        subjects: dict[str, Subject] = {}
+        for code, name, department_name in subject_rows:
+            if code in subjects and subjects[code].name.casefold() != name.casefold():
+                raise DataValidationError(
+                    f"Subject code '{code}' is mapped to multiple subject names."
+                )
+            subject = db.session.scalar(select(Subject).where(Subject.code == code))
+            if subject is None:
+                subject = Subject(
+                    code=code,
+                    name=name,
+                    department=department_name,
+                    source_type="real",
+                    dataset=dataset,
+                )
+                db.session.add(subject)
+            elif subject.name.casefold() != name.casefold():
+                raise DataValidationError(
+                    f"Existing subject code '{code}' belongs to '{subject.name}', not '{name}'."
+                )
+            subjects[code] = subject
+        db.session.flush()
+
+        primary_row = db.session.scalar(
+            select(ImportStagingStudent)
+            .where(ImportStagingStudent.data_import_id == import_id)
+            .order_by(ImportStagingStudent.row_number)
+            .limit(1)
+        )
+        exam = Exam(
+            subject=subjects[primary_row.subject_code],
+            exam_date=date.fromisoformat(options["exam_date"]),
+            start_time=time.fromisoformat(options["start_time"]),
+            end_time=time.fromisoformat(options["end_time"]),
+            session_name=options["session_name"],
+            academic_year=options["academic_year"],
+            status="scheduled",
+            source_type="real",
+            dataset=dataset,
+        )
+        db.session.add(exam)
+
+        for staged_chunk in _staging_chunks(import_id, import_record.chunk_size):
+            codes = [row.student_code for row in staged_chunk]
+            existing_students = {
+                student.student_code: student
+                for student in db.session.scalars(
+                    select(Student).where(Student.student_code.in_(codes))
+                ).all()
+            }
+            for row in staged_chunk:
+                student = existing_students.get(row.student_code)
+                if student is None:
+                    student = Student(student_code=row.student_code, source_type="real")
+                    db.session.add(student)
+                elif student.source_type != "real":
+                    raise DataValidationError(
+                        f"Student ID '{row.student_code}' already belongs to synthetic data."
+                    )
+                student.full_name = row.full_name
+                student.class_name = row.class_name
+                student.department = row.department_name
+                student.accessibility_required = row.accessibility_required
+                student.active = True
+                student.dataset = dataset
+                db.session.add(
+                    ExamRegistration(
+                        exam=exam,
+                        student=student,
+                        subject=subjects[row.subject_code],
+                        status="eligible",
+                    )
+                )
+            db.session.flush()
+
+        import_record.dataset = dataset
+        import_record.status = "completed"
+        import_record.committed_at = datetime.now(timezone.utc)
+        import_record.error_report = {
+            "message": "Valid staged records were committed successfully.",
+            "invalid_rows_retained": import_record.invalid_rows,
+        }
+        db.session.commit()
+        return dataset, exam, import_record
+    except (DataValidationError, IntegrityError) as exc:
+        db.session.rollback()
+        import_record = db.session.get(DataImport, import_id)
+        import_record.status = "validated"
+        import_record.error_report = {"message": str(exc)[:1000], "commit_failed": True}
+        db.session.commit()
+        if isinstance(exc, DataValidationError):
+            raise
+        raise DataValidationError("The import violates an existing database constraint.") from exc
+    except Exception:
+        db.session.rollback()
+        import_record = db.session.get(DataImport, import_id)
+        import_record.status = "validated"
+        import_record.error_report = {
+            "message": "Unexpected commit failure; staged rows were retained for retry.",
+            "commit_failed": True,
+        }
+        db.session.commit()
+        raise
+
+
 def _record_failed_import(import_id: int, message: str) -> None:
     db.session.rollback()
     record = db.session.get(DataImport, import_id)
@@ -187,130 +653,22 @@ def import_real_exam_dataset(
     session_name: str,
     academic_year: str,
 ) -> tuple[Dataset, Exam, DataImport]:
-    original_filename = (getattr(file_storage, "filename", None) or "students.csv")[:255]
-    import_record = DataImport(
-        import_type="students",
-        source_type="real",
-        original_filename=original_filename,
-        status="processing",
+    import_record, _reused = stage_student_import(
+        file_storage,
+        dataset_name=dataset_name,
+        dataset_version=dataset_version,
+        exam_date=exam_date,
+        start_time=start_time,
+        end_time=end_time,
+        session_name=session_name,
+        academic_year=academic_year,
     )
-    db.session.add(import_record)
-    db.session.commit()
-    import_id = import_record.id
-
-    try:
-        dataset_name = _limited(dataset_name, "Dataset name", 150, required=True)
-        dataset_version = _limited(dataset_version, "Dataset version", 50, required=True)
-        session_name = _limited(session_name, "Session name", 80, required=True)
-        academic_year = _limited(academic_year, "Academic year", 20, required=True)
-        if end_time <= start_time:
-            raise DataValidationError("Exam end time must be later than start time.")
-        if db.session.scalar(
-            select(Dataset).where(
-                Dataset.name == dataset_name, Dataset.version == dataset_version
-            )
-        ):
-            raise DataValidationError("A dataset with this name and version already exists.")
-
-        rows = parse_student_import(file_storage)
-        dataset = Dataset(
-            name=dataset_name,
-            version=dataset_version,
-            source_type="real",
-            description=f"Imported from {original_filename}",
-            status="active",
+    if import_record.invalid_rows:
+        raise DataValidationError(
+            f"Import #{import_record.id} contains {import_record.invalid_rows:,} invalid "
+            "row(s); review the error report before committing valid records."
         )
-        db.session.add(dataset)
-        db.session.flush()
-
-        subjects: dict[str, Subject] = {}
-        for row in rows:
-            code = row["subject_code"]
-            if code in subjects:
-                if subjects[code].name != row["subject_name"]:
-                    raise DataValidationError(
-                        f"Subject code '{code}' is mapped to multiple subject names."
-                    )
-                continue
-            subject = db.session.scalar(select(Subject).where(Subject.code == code))
-            if subject is None:
-                subject = Subject(
-                    code=code,
-                    name=row["subject_name"],
-                    department=row["department"],
-                    source_type="real",
-                    dataset=dataset,
-                )
-                db.session.add(subject)
-            elif subject.name.casefold() != row["subject_name"].casefold():
-                raise DataValidationError(
-                    f"Existing subject code '{code}' belongs to '{subject.name}', not "
-                    f"'{row['subject_name']}'."
-                )
-            subjects[code] = subject
-
-        db.session.flush()
-        primary_subject = subjects[rows[0]["subject_code"]]
-        exam = Exam(
-            subject=primary_subject,
-            exam_date=exam_date,
-            start_time=start_time,
-            end_time=end_time,
-            session_name=session_name,
-            academic_year=academic_year,
-            status="scheduled",
-            source_type="real",
-            dataset=dataset,
-        )
-        db.session.add(exam)
-        db.session.flush()
-
-        for row in rows:
-            student = db.session.scalar(
-                select(Student).where(Student.student_code == row["student_code"])
-            )
-            if student is None:
-                student = Student(
-                    student_code=row["student_code"],
-                    source_type="real",
-                )
-                db.session.add(student)
-            elif student.source_type != "real":
-                raise DataValidationError(
-                    f"Student ID '{row['student_code']}' already belongs to synthetic data."
-                )
-            student.full_name = row["full_name"]
-            student.class_name = row["class_name"]
-            student.department = row["department"]
-            student.accessibility_required = row["accessibility_required"]
-            student.active = True
-            student.dataset = dataset
-            db.session.flush()
-            db.session.add(
-                ExamRegistration(
-                    exam=exam,
-                    student=student,
-                    subject=subjects[row["subject_code"]],
-                    status="eligible",
-                )
-            )
-
-        import_record = db.session.get(DataImport, import_id)
-        import_record.dataset = dataset
-        import_record.status = "completed"
-        import_record.valid_rows = len(rows)
-        import_record.invalid_rows = 0
-        db.session.commit()
-        return dataset, exam, import_record
-    except (DataValidationError, IntegrityError) as exc:
-        message = str(exc)
-        _record_failed_import(import_id, message)
-        if isinstance(exc, DataValidationError):
-            raise
-        raise DataValidationError("The import violates an existing database constraint.") from exc
-    except Exception as exc:
-        _record_failed_import(import_id, "Unexpected import failure")
-        raise
+    return commit_staged_student_import(import_record.id)
 
 
 def generate_synthetic_dataset(

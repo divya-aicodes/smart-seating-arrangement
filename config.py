@@ -19,7 +19,9 @@ from flask import Flask, g, has_request_context
 
 
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024
+MAX_REQUEST_BYTES = 256 * 1024 * 1024
 MAX_STUDENTS = 5_000
+DEFAULT_IMPORT_CHUNK_SIZE = 5_000
 
 
 def _env_flag(
@@ -33,6 +35,27 @@ def _env_flag(
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(
+    name: str,
+    default: int,
+    minimum: int,
+    maximum: int,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> int:
+    values = environ if environ is not None else os.environ
+    raw_value = values.get(name)
+    if raw_value is None:
+        return default
+    try:
+        value = int(raw_value.strip())
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a whole number.") from exc
+    if not minimum <= value <= maximum:
+        raise RuntimeError(f"{name} must be between {minimum} and {maximum}.")
+    return value
 
 
 def _parse_cors_origins(raw_value: str) -> set[str]:
@@ -151,7 +174,14 @@ def load_app_config(environ: Mapping[str, str] | None = None) -> dict[str, objec
         "APP_ENV": "production" if is_production else "development",
         "IS_PRODUCTION": is_production,
         "SECRET_KEY": configured_secret or secrets.token_urlsafe(32),
-        "MAX_CONTENT_LENGTH": MAX_UPLOAD_BYTES,
+        "MAX_CONTENT_LENGTH": MAX_REQUEST_BYTES,
+        "IMPORT_CHUNK_SIZE": _env_int(
+            "IMPORT_CHUNK_SIZE",
+            DEFAULT_IMPORT_CHUNK_SIZE,
+            100,
+            20_000,
+            environ=values,
+        ),
         "SESSION_COOKIE_NAME": "smart_seating_session",
         "SESSION_COOKIE_HTTPONLY": True,
         "SESSION_COOKIE_SAMESITE": session_cookie_samesite,
