@@ -56,7 +56,11 @@ class TestPostgresIntegration(unittest.TestCase):
         version = self.db.session.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-        self.assertEqual(version, "d3e5f7a9b024")
+        self.assertEqual(version, "e4f6a8b0c135")
+        seating_run_columns = {
+            column["name"] for column in inspect(self.db.engine).get_columns("seating_runs")
+        }
+        self.assertIn("solver_status", seating_run_columns)
 
     def test_postgresql_transaction_rollback_preserves_database_state(self):
         from models import Dataset
