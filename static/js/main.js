@@ -8,9 +8,46 @@ document.addEventListener("DOMContentLoaded", () => {
     initFileInputs();
     initLayoutRecommendations();
     initTableSearch();
+    initJobProgress();
     initSeatLabelToggle();
     initSubmitState();
 });
+
+function initJobProgress() {
+    const rows = Array.from(document.querySelectorAll("[data-job-row][data-job-url]"));
+    if (!rows.length) return;
+    const terminal = new Set(["completed", "failed", "cancelled"]);
+
+    const refresh = async () => {
+        let hasActiveJobs = false;
+        await Promise.all(rows.map(async row => {
+            const currentStatus = row.querySelector("[data-job-status]")?.textContent.trim().toLowerCase();
+            if (terminal.has(currentStatus)) return;
+            hasActiveJobs = true;
+            try {
+                const response = await fetch(row.dataset.jobUrl, {
+                    credentials: "same-origin",
+                    headers: { "Accept": "application/json" }
+                });
+                if (!response.ok) return;
+                const job = (await response.json()).data;
+                const status = row.querySelector("[data-job-status]");
+                const progress = row.querySelector("[data-job-progress]");
+                const bar = row.querySelector("[data-job-progress-bar]");
+                if (status) {
+                    status.textContent = job.status;
+                    status.className = `status-text status-${job.status}`;
+                }
+                if (progress) progress.textContent = `${job.progress.percentage}% · ${job.progress.message || "Waiting"}`;
+                if (bar) bar.style.width = `${job.progress.percentage}%`;
+            } catch (_) {
+                // Preserve the last durable state when a transient poll fails.
+            }
+        }));
+        if (hasActiveJobs) window.setTimeout(refresh, 5000);
+    };
+    refresh();
+}
 
 function initHeader() {
     const header = document.querySelector("[data-site-header]");

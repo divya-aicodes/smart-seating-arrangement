@@ -1,0 +1,17 @@
+{% macro render_pagination(navigation, label='records') %}
+{% set page = navigation.page %}
+{% if page.total %}
+<nav class="pagination" aria-label="{{ label }} pagination">
+    <p>Showing {{ page.first_item }}–{{ page.last_item }} of {{ page.total }}</p>
+    <div class="pagination-links">
+        {% if navigation.previous_url %}<a href="{{ navigation.previous_url }}" rel="prev">Previous</a>{% else %}<span class="is-disabled">Previous</span>{% endif %}
+        {% for link in navigation.links %}
+            {% if link.ellipsis %}<span aria-hidden="true">…</span>
+            {% elif link.current %}<span class="is-current" aria-current="page">{{ link.number }}</span>
+            {% else %}<a href="{{ link.url }}">{{ link.number }}</a>{% endif %}
+        {% endfor %}
+        {% if navigation.next_url %}<a href="{{ navigation.next_url }}" rel="next">Next</a>{% else %}<span class="is-disabled">Next</span>{% endif %}
+    </div>
+</nav>
+{% endif %}
+{% endmacro %}

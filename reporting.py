@@ -5,6 +5,8 @@ from __future__ import annotations
 from io import BytesIO
 from typing import Any
 from xml.sax.saxutils import escape
+from collections import Counter
+import json
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -22,11 +24,22 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
-from sqlalchemy import select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import joinedload
 
 from extensions import db
-from models import Exam, ExamRegistration, ExamSession, Seat, SeatAllocation, SeatingRun
+from models import (
+    Exam,
+    ExamRegistration,
+    ExamSession,
+    InvigilatorAssignment,
+    Room,
+    Seat,
+    SeatAllocation,
+    SeatingRun,
+    Student,
+)
+from pagination import page_navigation, paginate
 
 
 REPORTABLE_STATUSES = {"completed", "published"}
@@ -46,86 +59,193 @@ def _pdf_text(value: Any) -> str:
     return escape(str(value if value is not None else ""))
 
 
-def load_report_data(run_id: int) -> dict[str, Any]:
-    statement = (
+def _load_report_run(run_id: int) -> SeatingRun:
+    run = db.session.execute(
         select(SeatingRun)
         .where(SeatingRun.id == run_id)
         .options(
             joinedload(SeatingRun.exam).joinedload(Exam.dataset),
             joinedload(SeatingRun.exam).joinedload(Exam.subject),
             joinedload(SeatingRun.session).joinedload(ExamSession.dataset),
-            joinedload(SeatingRun.allocations).joinedload(SeatAllocation.student),
-            joinedload(SeatingRun.allocations)
-            .joinedload(SeatAllocation.seat)
-            .joinedload(Seat.room),
-            joinedload(SeatingRun.allocations).joinedload(SeatAllocation.room),
         )
-    )
-    run = db.session.execute(statement).unique().scalar_one_or_none()
+    ).unique().scalar_one_or_none()
     if run is None or run.status not in REPORTABLE_STATUSES:
         raise ReportNotAvailable("The requested completed seating run does not exist.")
     if not (run.validation_result or {}).get("overall_valid", False):
         raise ReportNotAvailable("Reports require a seating run with valid hard constraints.")
+    return run
 
+
+def _registration_subjects(session_id: int, student_ids: list[int] | None = None):
+    statement = select(ExamRegistration).where(
+        ExamRegistration.exam_session_id == session_id,
+        ExamRegistration.verification_status == "verified",
+    )
+    if student_ids is not None:
+        statement = statement.where(ExamRegistration.student_id.in_(student_ids or [-1]))
     registrations = db.session.scalars(
-        select(ExamRegistration)
-        .where(
-            ExamRegistration.exam_session_id == run.exam_session_id,
-            ExamRegistration.verification_status == "verified",
-        )
-        .options(joinedload(ExamRegistration.subject))
+        statement.options(joinedload(ExamRegistration.subject))
     ).all()
-    registration_subjects = {
+    return {
         registration.student_id: registration.subject.name
         for registration in registrations
         if registration.subject is not None
     }
 
-    allocations = sorted(
-        run.allocations,
-        key=lambda item: (
-            item.room.building.casefold(),
-            item.room.room_number.casefold(),
-            item.seat.row_number,
-            item.seat.bench_number,
-            item.seat.seat_number,
-        ),
-    )
-    rows = []
-    for allocation in allocations:
-        student = allocation.student
-        seat = allocation.seat
-        room = allocation.room
-        rows.append({
-            "room": f"{room.building} / {room.room_number}",
-            "seat_code": seat.seat_code,
-            "row": seat.row_number,
-            "bench": seat.bench_number,
-            "seat": seat.seat_number,
-            "student_id": student.student_code,
-            "student_name": student.full_name or "",
-            "class_name": student.class_name,
-            "subject": registration_subjects.get(student.id, run.exam.subject.name),
-            "accessibility_required": student.accessibility_required,
-            "accessible_seat": seat.accessible,
-            "subject_relaxed": allocation.subject_relaxed,
-        })
 
-    room_ids = {allocation.room_id for allocation in allocations}
+def _allocation_statement(run_id: int):
+    return (
+        select(SeatAllocation)
+        .where(SeatAllocation.seating_run_id == run_id)
+        .join(SeatAllocation.student)
+        .join(SeatAllocation.room)
+        .join(SeatAllocation.seat)
+        .options(
+            joinedload(SeatAllocation.student),
+            joinedload(SeatAllocation.seat).joinedload(Seat.room),
+            joinedload(SeatAllocation.room),
+        )
+        .order_by(
+            Room.building,
+            Room.room_number,
+            Seat.row_number,
+            Seat.bench_number,
+            Seat.seat_number,
+        )
+    )
+
+
+def _allocation_row(allocation: SeatAllocation, registration_subjects: dict[int, str], fallback_subject: str):
+    student = allocation.student
+    seat = allocation.seat
+    room = allocation.room
+    return {
+        "room": f"{room.building} / {room.room_number}",
+        "room_id": room.id,
+        "room_capacity": room.capacity,
+        "seat_code": seat.seat_code,
+        "row": seat.row_number,
+        "bench": seat.bench_number,
+        "seat": seat.seat_number,
+        "student_id": student.student_code,
+        "student_name": student.full_name or "",
+        "class_name": student.class_name,
+        "subject": registration_subjects.get(student.id, fallback_subject),
+        "accessibility_required": student.accessibility_required,
+        "accessible_seat": seat.accessible,
+        "subject_relaxed": allocation.subject_relaxed,
+    }
+
+
+def load_report_summary(run_id: int) -> dict[str, Any]:
+    run = _load_report_run(run_id)
+    allocation_count, room_count, accessibility_count, relaxation_count = db.session.execute(
+        select(
+            func.count(SeatAllocation.id),
+            func.count(func.distinct(SeatAllocation.room_id)),
+            func.coalesce(func.sum(case((Student.accessibility_required.is_(True), 1), else_=0)), 0),
+            func.coalesce(func.sum(case((SeatAllocation.subject_relaxed.is_(True), 1), else_=0)), 0),
+        )
+        .join(Student, Student.id == SeatAllocation.student_id)
+        .where(SeatAllocation.seating_run_id == run_id)
+    ).one()
     validation = run.validation_result or {}
     return {
         "run": run,
         "exam": run.exam,
         "session": run.session,
         "dataset": run.session.dataset,
-        "rows": rows,
-        "allocation_count": len(rows),
-        "room_count": len(room_ids),
-        "accessibility_count": sum(row["accessibility_required"] for row in rows),
-        "relaxation_count": sum(row["subject_relaxed"] for row in rows),
+        "allocation_count": allocation_count,
+        "room_count": room_count,
+        "accessibility_count": accessibility_count,
+        "relaxation_count": relaxation_count,
         "validation": validation,
         "propositions": validation.get("propositions", []),
+        "mathematics": run.solver_config or {},
     }
+
+
+def _add_operational_summaries(report: dict[str, Any]) -> None:
+    room_summary = {}
+    for row in report["rows"]:
+        item = room_summary.setdefault(
+            row["room"], {"room": row["room"], "capacity": row["room_capacity"], "allocated": 0}
+        )
+        item["allocated"] += 1
+    for item in room_summary.values():
+        item["utilization"] = round(item["allocated"] * 100 / max(1, item["capacity"]), 1)
+    subject_counts = Counter(row["subject"] for row in report["rows"])
+    assignments = db.session.scalars(
+        select(InvigilatorAssignment)
+        .where(InvigilatorAssignment.exam_id == report["exam"].id)
+        .options(
+            joinedload(InvigilatorAssignment.invigilator),
+            joinedload(InvigilatorAssignment.room),
+        )
+        .order_by(InvigilatorAssignment.room_id, InvigilatorAssignment.id)
+    ).all()
+    report["room_summary"] = list(room_summary.values())
+    report["subject_summary"] = [
+        {"subject": subject, "allocated": count}
+        for subject, count in sorted(subject_counts.items())
+    ]
+    report["accessible_rows"] = [
+        row for row in report["rows"] if row["accessibility_required"]
+    ]
+    report["invigilators"] = [
+        {
+            "room": f"{item.room.building} / {item.room.room_number}",
+            "employee_code": item.invigilator.employee_code,
+            "name": item.invigilator.full_name,
+            "role": item.role,
+        }
+        for item in assignments
+    ]
+
+
+def load_report_data(run_id: int) -> dict[str, Any]:
+    report = load_report_summary(run_id)
+    run = report["run"]
+    allocations = db.session.execute(_allocation_statement(run_id)).unique().scalars().all()
+    registration_subjects = _registration_subjects(
+        run.exam_session_id, [allocation.student_id for allocation in allocations]
+    )
+    report["rows"] = [
+        _allocation_row(allocation, registration_subjects, run.exam.subject.name)
+        for allocation in allocations
+    ]
+    _add_operational_summaries(report)
+    return report
+
+
+def load_report_page(run_id: int, *, query: str = "", per_page: int = 50) -> dict[str, Any]:
+    report = load_report_summary(run_id)
+    statement = _allocation_statement(run_id)
+    if query:
+        pattern = f"%{query[:100]}%"
+        statement = statement.where(
+            or_(
+                Student.student_code.ilike(pattern),
+                Student.full_name.ilike(pattern),
+                Student.class_name.ilike(pattern),
+                Room.building.ilike(pattern),
+                Room.room_number.ilike(pattern),
+                Seat.seat_code.ilike(pattern),
+            )
+        )
+    allocation_page = paginate(statement, per_page=per_page)
+    subjects = _registration_subjects(
+        report["run"].exam_session_id,
+        [allocation.student_id for allocation in allocation_page.items],
+    )
+    report["rows"] = [
+        _allocation_row(allocation, subjects, report["exam"].subject.name)
+        for allocation in allocation_page.items
+    ]
+    report["allocation_page"] = allocation_page
+    report["allocation_navigation"] = page_navigation(allocation_page)
+    report["query"] = query
+    return report
 
 
 def build_pdf_report(report: dict[str, Any]) -> BytesIO:
@@ -261,6 +381,52 @@ def build_pdf_report(report: dict[str, Any]) -> BytesIO:
         ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
     ]))
     story.append(allocation_table)
+
+    story.extend([Spacer(1, 10), Paragraph("Room capacity and utilization", section_style)])
+    room_rows = [["Room", "Capacity", "Allocated", "Utilization"]] + [
+        [item["room"], item["capacity"], item["allocated"], f'{item["utilization"]}%']
+        for item in report["room_summary"]
+    ]
+    room_table = Table(room_rows, repeatRows=1, colWidths=[85 * mm, 32 * mm, 32 * mm, 38 * mm])
+    room_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#17324D")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#C7D2DC")),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+    ]))
+    story.append(KeepTogether(room_table))
+
+    if report["subject_summary"]:
+        story.extend([Spacer(1, 8), Paragraph("Subject allocation summary", section_style)])
+        subject_rows = [["Subject", "Allocated students"]] + [
+            [item["subject"], item["allocated"]] for item in report["subject_summary"]
+        ]
+        subject_table = Table(subject_rows, repeatRows=1, colWidths=[145 * mm, 42 * mm])
+        subject_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#17324D")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#C7D2DC")),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ]))
+        story.append(KeepTogether(subject_table))
+
+    if report["invigilators"]:
+        story.extend([Spacer(1, 8), Paragraph("Invigilator assignments", section_style)])
+        invigilator_rows = [["Room", "Employee", "Name", "Role"]] + [
+            [item["room"], item["employee_code"], item["name"], item["role"]]
+            for item in report["invigilators"]
+        ]
+        invigilator_table = Table(invigilator_rows, repeatRows=1, colWidths=[58 * mm, 35 * mm, 58 * mm, 36 * mm])
+        invigilator_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#17324D")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#C7D2DC")),
+            ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ]))
+        story.append(KeepTogether(invigilator_table))
 
     if report["propositions"]:
         story.extend([Spacer(1, 10), Paragraph("Validation certificate", section_style)])
@@ -429,6 +595,86 @@ def build_excel_report(report: dict[str, Any]) -> BytesIO:
     for column, width in {"A": 22, "B": 30, "C": 3, "D": 24, "E": 18}.items():
         summary.column_dimensions[column].width = width
     summary.freeze_panes = "A6"
+
+    def append_register(title, headers, rows, widths=None):
+        sheet = workbook.create_sheet(title)
+        sheet.sheet_view.showGridLines = False
+        sheet.append(headers)
+        for values in rows:
+            sheet.append([
+                _safe_spreadsheet_text(value) if isinstance(value, str) else value
+                for value in values
+            ])
+        for cell in sheet[1]:
+            cell.font = Font(name="Arial", size=10, bold=True, color=white)
+            cell.fill = PatternFill("solid", fgColor=navy)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        for row_values in sheet.iter_rows(min_row=2):
+            for cell in row_values:
+                cell.font = Font(name="Arial", size=10)
+                cell.alignment = Alignment(vertical="center")
+        sheet.freeze_panes = "A2"
+        sheet.auto_filter.ref = sheet.dimensions
+        for index, width in enumerate(widths or [28] * len(headers), start=1):
+            sheet.column_dimensions[chr(64 + index)].width = width
+        return sheet
+
+    append_register(
+        "Room Summary",
+        ["Room", "Capacity", "Allocated", "Utilization percent"],
+        [
+            [item["room"], item["capacity"], item["allocated"], item["utilization"]]
+            for item in report["room_summary"]
+        ],
+        [32, 14, 14, 22],
+    )
+    append_register(
+        "Subject Summary",
+        ["Subject", "Allocated students"],
+        [[item["subject"], item["allocated"]] for item in report["subject_summary"]],
+        [42, 22],
+    )
+    append_register(
+        "Accessible Seating",
+        ["Student ID", "Student name", "Room", "Seat", "Accessible seat"],
+        [
+            [row["student_id"], row["student_name"], row["room"], row["seat_code"], "Yes" if row["accessible_seat"] else "No"]
+            for row in report["accessible_rows"]
+        ],
+        [18, 28, 32, 24, 18],
+    )
+    append_register(
+        "Invigilators",
+        ["Room", "Employee code", "Name", "Role"],
+        [
+            [item["room"], item["employee_code"], item["name"], item["role"]]
+            for item in report["invigilators"]
+        ],
+        [32, 18, 28, 20],
+    )
+    append_register(
+        "Validation",
+        ["Proposition", "Type", "Satisfied", "Violations"],
+        [
+            [
+                item.get("id", ""),
+                item.get("type", ""),
+                "Yes" if item.get("satisfied") else "No",
+                item.get("violation_count", len(item.get("violations", []))),
+            ]
+            for item in report["propositions"]
+        ],
+        [24, 38, 14, 14],
+    )
+    append_register(
+        "Mathematics",
+        ["Metric", "Recorded value"],
+        [
+            [key.replace("_", " ").title(), json.dumps(value, sort_keys=True) if isinstance(value, (dict, list)) else value]
+            for key, value in sorted(report["mathematics"].items())
+        ],
+        [36, 90],
+    )
 
     buffer = BytesIO()
     workbook.save(buffer)

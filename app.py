@@ -72,14 +72,22 @@ from data_routes import data_bp  # noqa: E402
 from report_routes import report_bp  # noqa: E402
 from api_routes import api_bp  # noqa: E402
 from job_routes import job_api_bp, job_bp  # noqa: E402
+from admin_routes import admin_bp  # noqa: E402
 from models import Exam, ExamRegistration, ExamSession, Room, Seat, Student  # noqa: E402
 from security import record_audit  # noqa: E402
+from solver_status import solver_status_info  # noqa: E402
 
 app.register_blueprint(data_bp)
 app.register_blueprint(report_bp)
 app.register_blueprint(api_bp)
 app.register_blueprint(job_bp)
 app.register_blueprint(job_api_bp)
+app.register_blueprint(admin_bp)
+
+
+@app.context_processor
+def shared_template_helpers():
+    return {"solver_status_info": solver_status_info}
 
 
 @app.cli.command("recover-stale-jobs")

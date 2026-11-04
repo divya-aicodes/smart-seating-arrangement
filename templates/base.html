@@ -43,6 +43,9 @@
                 <a href="{{ url_for('reports.dashboard') }}" class="nav-link {{ 'is-active' if request.endpoint and request.endpoint.startswith('reports.') else '' }}">
                     Reports
                 </a>
+                <a href="{{ url_for('administration.dashboard') }}" class="nav-link {{ 'is-active' if request.endpoint and request.endpoint.startswith('administration.') else '' }}">
+                    Administration
+                </a>
                 <a href="{{ url_for('sample_csv') }}" class="nav-link nav-link-download">
                     CSV template
                     <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v8m0 0 3-3m-3 3L5 7M3 13h10"/></svg>

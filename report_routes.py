@@ -2,15 +2,16 @@
 
 import hashlib
 
-from flask import Blueprint, abort, current_app, redirect, render_template, send_file, url_for
-from sqlalchemy import func, select
+from flask import Blueprint, abort, current_app, redirect, render_template, request, send_file, url_for
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import joinedload
 
 from extensions import db
 from background_service import create_job, fail_job
 from background_tasks import enqueue_job
-from models import Exam, ExamSession, SeatAllocation, SeatingRun
-from reporting import ReportNotAvailable, build_excel_report, build_pdf_report, load_report_data
+from models import BackgroundJob, Dataset, Exam, ExamSession, SeatAllocation, SeatingRun
+from pagination import page_navigation, paginate
+from reporting import ReportNotAvailable, build_excel_report, build_pdf_report, load_report_data, load_report_page
 from security import record_audit
 
 
@@ -66,17 +67,38 @@ def queue_report(run_id: int, report_format: str):
 
 @report_bp.get("")
 def dashboard():
-    runs = db.session.scalars(
+    query = request.args.get("q", "").strip()[:100]
+    solver_status = request.args.get("solver_status", "").strip().upper()
+    allowed_solver_statuses = {
+        "OPTIMAL", "FEASIBLE", "FEASIBLE_WITH_RELAXATION", "INFEASIBLE",
+        "TIME_LIMIT_REACHED", "UNKNOWN",
+    }
+    statement = (
         select(SeatingRun)
+        .join(SeatingRun.session)
+        .outerjoin(ExamSession.dataset)
         .where(SeatingRun.status.in_(["completed", "published"]))
         .options(
             joinedload(SeatingRun.exam).joinedload(Exam.dataset),
             joinedload(SeatingRun.session).joinedload(ExamSession.dataset),
         )
         .order_by(SeatingRun.generated_at.desc(), SeatingRun.id.desc())
-        .limit(100)
-    ).all()
-    run_ids = [run.id for run in runs]
+    )
+    if query:
+        pattern = f"%{query}%"
+        statement = statement.where(
+            or_(
+                ExamSession.session_name.ilike(pattern),
+                Dataset.name.ilike(pattern),
+                SeatingRun.created_by.ilike(pattern),
+            )
+        )
+    if solver_status in allowed_solver_statuses:
+        statement = statement.where(SeatingRun.solver_status == solver_status)
+    else:
+        solver_status = ""
+    runs = paginate(statement, per_page=20)
+    run_ids = [run.id for run in runs.items]
     allocation_counts = dict(
         db.session.execute(
             select(SeatAllocation.seating_run_id, func.count(SeatAllocation.id))
@@ -104,14 +126,28 @@ def dashboard():
     return render_template(
         "reports_dashboard.html",
         runs=runs,
+        navigation=page_navigation(runs),
         allocation_counts=allocation_counts,
         stats=stats,
+        query=query,
+        selected_solver_status=solver_status,
+        solver_statuses=sorted(allowed_solver_statuses),
+        export_jobs=db.session.scalars(
+            select(BackgroundJob)
+            .where(BackgroundJob.job_type == "report_generation")
+            .order_by(BackgroundJob.created_at.desc())
+            .limit(6)
+        ).all(),
     )
 
 
 @report_bp.get("/runs/<int:run_id>")
 def run_detail(run_id: int):
-    return render_template("report_detail.html", report=_report_or_404(run_id))
+    try:
+        report = load_report_page(run_id, query=request.args.get("q", "").strip())
+    except ReportNotAvailable as exc:
+        abort(404, description=str(exc))
+    return render_template("report_detail.html", report=report)
 
 
 @report_bp.get("/runs/<int:run_id>.pdf")

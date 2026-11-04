@@ -2,7 +2,8 @@
 
 from io import BytesIO
 
-from flask import Blueprint, abort, current_app, jsonify, redirect, render_template, send_file, url_for
+from flask import Blueprint, abort, current_app, jsonify, redirect, render_template, request, send_file, url_for
+from sqlalchemy import func, select
 
 from background_service import fail_job, request_cancellation, reset_for_retry
 from background_tasks import enqueue_job
@@ -63,6 +64,45 @@ def status(job_id):
 @job_api_bp.get("/<int:job_id>")
 def api_status(job_id):
     return jsonify({"data": job_json(_job_or_404(job_id))})
+
+
+@job_api_bp.get("")
+def api_list():
+    try:
+        page = max(1, int(request.args.get("page", "1")))
+        per_page = min(100, max(1, int(request.args.get("per_page", "25"))))
+    except ValueError:
+        abort(400, description="page and per_page must be whole numbers.")
+    statement = select(BackgroundJob)
+    status_filter = request.args.get("status", "").strip().lower()
+    type_filter = request.args.get("type", "").strip().lower()
+    if status_filter:
+        if status_filter not in {"queued", "running", "completed", "failed", "cancelled"}:
+            abort(400, description="Unsupported background job status.")
+        statement = statement.where(BackgroundJob.status == status_filter)
+    if type_filter:
+        if type_filter not in {
+            "import_stage", "import_commit", "seating_optimization", "report_generation"
+        }:
+            abort(400, description="Unsupported background job type.")
+        statement = statement.where(BackgroundJob.job_type == type_filter)
+    total = db.session.scalar(
+        select(func.count()).select_from(statement.subquery())
+    ) or 0
+    jobs = db.session.scalars(
+        statement.order_by(BackgroundJob.created_at.desc())
+        .limit(per_page)
+        .offset((page - 1) * per_page)
+    ).all()
+    return jsonify({
+        "data": [job_json(job) for job in jobs],
+        "pagination": {
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "pages": (total + per_page - 1) // per_page,
+        },
+    })
 
 
 @job_bp.post("/<int:job_id>/cancel")

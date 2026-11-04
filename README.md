@@ -118,8 +118,21 @@ timed-out runs retain truthful feasible, time-limit, or unknown outcomes.
 - Identify relaxable same-subject adjacency pairs.
 - Calculate invigilators required for each room.
 - Export the immediate result as CSV.
-- Export persisted runs as PDF and XLSX.
+- Export persisted runs as PDF and XLSX, synchronously for small runs or through
+  durable background jobs above the configured allocation threshold.
+- Include student-wise allocations, room utilization, subject summaries,
+  accessible seating, invigilator assignments, solver mathematics, and the
+  independent validation certificate in the report package.
 - Publish completed persisted runs through the API.
+
+### Institutional administration
+
+- Inspect academic departments, specialisations, sections, and subjects.
+- Review exam sessions, paper counts, verified registrations, rooms, and seats.
+- Follow PostgreSQL-backed import, optimization, and report-job progress.
+- Review a privacy-bounded audit register without exposing stored change payloads.
+- Paginate large HTML registers on the server instead of loading institution-wide
+  records into the browser.
 
 ## End-to-end workflow
 
@@ -709,6 +722,12 @@ The legacy class and department text fields remain available for backward compat
 | `GET` | `/reports/runs/<run_id>` | View one persisted seating report |
 | `GET` | `/reports/runs/<run_id>.pdf` | Download PDF report |
 | `GET` | `/reports/runs/<run_id>.xlsx` | Download XLSX report |
+| `GET` | `/administration` | Institution operations overview |
+| `GET` | `/administration/academics` | Paginated academic structure register |
+| `GET` | `/administration/examinations` | Paginated session and registration register |
+| `GET` | `/administration/rooms` | Paginated room and seat inventory |
+| `GET` | `/administration/jobs` | Durable background-job history and progress |
+| `GET` | `/administration/audit` | Privacy-bounded audit history |
 
 All project pages open directly; there is no login, sign-in, or sign-up page.
 
@@ -734,6 +753,8 @@ The API root is `/api/v1`.
 | `GET` | `/api/v1/exams/<id>` | Exam detail |
 | `GET` | `/api/v1/rooms` | Paginated room list |
 | `GET` | `/api/v1/rooms/<id>` | Room detail |
+| `GET` | `/api/v1/jobs` | Paginated background jobs with type/status filters |
+| `GET` | `/api/v1/jobs/<id>` | Durable job progress and result |
 | `GET` | `/api/v1/seating-runs` | Paginated run list |
 | `GET` | `/api/v1/seating-runs/<id>` | Run detail |
 | `GET` | `/api/v1/seating-runs/<id>/allocations` | Paginated allocations |
@@ -749,7 +770,11 @@ The interface is a professional, light-only operations workspace.
 
 - Light paper, white, navy, engineering-blue, and restrained orange palette.
 - Barlow, Barlow Condensed, and IBM Plex Mono typography.
-- Responsive planning, data, reports, results, and report-detail pages.
+- Responsive planning, data, reports, results, report-detail, and administration pages.
+- Server-side pagination for students, datasets, sessions, rooms, imports, jobs,
+  audit events, reports, and persisted allocations.
+- Truthful solver-outcome labels that distinguish optimal, feasible, relaxed,
+  infeasible, timeout, and unknown states.
 - Mobile navigation without horizontal overflow.
 - Semantic labels, tables, buttons, forms, and status messages.
 - Visible keyboard focus treatment.
@@ -761,7 +786,8 @@ The interface is a professional, light-only operations workspace.
 
 Client JavaScript improves interaction but never replaces server validation. It
 manages source-mode controls, room filtering, capacity previews, file labels,
-table search, seat-label toggles, navigation, and submit feedback.
+bounded table search, durable-job progress polling, seat-label toggles, navigation,
+and submit feedback.
 
 ## Security model
 
@@ -920,6 +946,8 @@ The fast suite covers:
 - security headers and production configuration;
 - payload limits, duplicate rejection, and CSV formula-injection prevention;
 - API pagination and publication;
+- server-side HTML pagination, administration registers, solver-status copy, and
+  multi-sheet operational exports;
 - capacity, accessibility, adjacency, and strict failure behavior; and
 - handshaking, chromatic-polynomial, Product Rule, and inclusion-exclusion logic.
 

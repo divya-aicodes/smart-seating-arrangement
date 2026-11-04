@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_pagination.html" import render_pagination %}
 
 {% block title %}Data Workspace | SeatPlan{% endblock %}
 
@@ -140,14 +141,14 @@
                 <span class="summary-control" aria-hidden="true"></span>
             </summary>
             <div class="operation-body">
-                {% if datasets %}
+                {% if dataset_options %}
                 <form action="{{ url_for('data.create_room') }}" method="POST">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <div class="field-grid field-grid-four">
                         <div class="field-group field-span-two">
                             <label for="room_dataset">Dataset</label>
                             <select id="room_dataset" name="dataset_id" class="field-control" required>
-                                {% for dataset in datasets %}<option value="{{ dataset.id }}">{{ dataset.name }} · {{ dataset.version }} [{{ dataset.source_type | upper }}]</option>{% endfor %}
+                                {% for dataset in dataset_options %}<option value="{{ dataset.id }}">{{ dataset.name }} · {{ dataset.version }} [{{ dataset.source_type | upper }}]</option>{% endfor %}
                             </select>
                         </div>
                         <div class="field-group"><label for="room_number">Room number</label><input id="room_number" name="room_number" class="field-control" required placeholder="A-101"></div>
@@ -178,7 +179,7 @@
     </header>
 
     <div class="record-panel reveal">
-        <div class="record-panel-header"><div><h3>Datasets</h3><p>Imported and generated lineage</p></div><span class="count-chip">{{ datasets | length }} shown</span></div>
+        <div class="record-panel-header"><div><h3>Datasets</h3><p>Imported and generated lineage</p></div><span class="count-chip">{{ datasets_nav.page.total }} total</span></div>
         <div class="table-wrap">
             <table class="data-table">
                 <thead><tr><th>Name</th><th>Version</th><th>Source</th><th>Seed</th><th>Status</th><th>Created</th></tr></thead>
@@ -189,32 +190,35 @@
                 </tbody>
             </table>
         </div>
+        {{ render_pagination(datasets_nav, 'datasets') }}
     </div>
 
     <div class="records-split">
         <div class="record-panel reveal">
-            <div class="record-panel-header"><div><h3>Exam sessions</h3><p>Scheduled sessions and verified subject papers</p></div><span class="count-chip">{{ sessions | length }} shown</span></div>
+            <div class="record-panel-header"><div><h3>Exam sessions</h3><p>Scheduled sessions and verified subject papers</p></div><span class="count-chip">{{ sessions_nav.page.total }} total</span></div>
             <div class="table-wrap">
                 <table class="data-table compact-table">
                     <thead><tr><th>Date</th><th>Session</th><th>Papers</th><th>Source</th><th>Status</th></tr></thead>
                     <tbody>{% for session in sessions %}<tr><td>{{ session.exam_date }}</td><td><strong>{{ session.session_name }}</strong><small>{{ session.start_time }}–{{ session.end_time }}</small></td><td>{{ session.papers | length }}</td><td>{{ session.source_type | upper }}</td><td>{{ session.status }}</td></tr>{% else %}<tr><td colspan="5"><div class="table-empty">No exam sessions yet.</div></td></tr>{% endfor %}</tbody>
                 </table>
             </div>
+            {{ render_pagination(sessions_nav, 'exam sessions') }}
         </div>
 
         <div class="record-panel reveal">
-            <div class="record-panel-header"><div><h3>Rooms</h3><p>Active room inventory</p></div><span class="count-chip">{{ rooms | length }} shown</span></div>
+            <div class="record-panel-header"><div><h3>Rooms</h3><p>Active room inventory</p></div><span class="count-chip">{{ rooms_nav.page.total }} total</span></div>
             <div class="table-wrap">
                 <table class="data-table compact-table">
                     <thead><tr><th>Location</th><th>Layout</th><th>Capacity</th><th>Source</th></tr></thead>
                     <tbody>{% for room in rooms %}<tr><td><strong>{{ room.building }} / {{ room.room_number }}</strong><small>{{ 'Floor ' ~ room.floor if room.floor else 'Floor not set' }}</small></td><td>{{ room.rows }} × {{ room.benches_per_row }} × {{ room.seats_per_bench }}</td><td>{{ room.capacity }}</td><td>{{ room.source_type | upper }}</td></tr>{% else %}<tr><td colspan="4"><div class="table-empty">No active rooms yet.</div></td></tr>{% endfor %}</tbody>
                 </table>
             </div>
+            {{ render_pagination(rooms_nav, 'rooms') }}
         </div>
     </div>
 
     <div class="record-panel reveal" id="stored-students">
-        <div class="record-panel-header"><div><h3>Recently stored students</h3><p>Actual database records from the latest imports and generated datasets</p></div><span class="count-chip">{{ recent_students | length }} shown</span></div>
+        <div class="record-panel-header"><div><h3>Recently stored students</h3><p>Actual database records from imports and generated datasets</p></div><span class="count-chip">{{ students_nav.page.total }} total</span></div>
         <div class="table-wrap">
             <table class="data-table" id="students-table">
                 <thead><tr><th>Student ID</th><th>Name</th><th>Class</th><th>Department</th><th>Source</th><th>Dataset</th><th>Access</th></tr></thead>
@@ -235,10 +239,16 @@
                 </tbody>
             </table>
         </div>
+        {{ render_pagination(students_nav, 'students') }}
     </div>
 
     <div class="record-panel reveal">
-        <div class="record-panel-header"><div><h3>Import history</h3><p>Most recent validation outcomes</p></div><span class="count-chip">{{ imports | length }} shown</span></div>
+        <div class="record-panel-header"><div><h3>Background operations</h3><p>Live progress for imports, optimization and exports</p></div><a class="text-link" href="{{ url_for('administration.jobs') }}">View all jobs</a></div>
+        <div class="table-wrap"><table class="data-table compact-table"><thead><tr><th>Job</th><th>Operation</th><th>Status</th><th>Progress</th></tr></thead><tbody>{% for job in jobs %}<tr data-job-row data-job-url="{{ url_for('jobs.status', job_id=job.id) }}"><td><a class="run-link" href="{{ url_for('jobs.detail', job_id=job.id) }}">#{{ job.id }}</a></td><td>{{ job.job_type | replace('_', ' ') }}</td><td><span data-job-status class="status-text status-{{ job.status }}">{{ job.status }}</span></td><td><span data-job-progress>{{ ((job.progress_current * 100 / job.progress_total) | round(1)) if job.progress_total else 0 }}% · {{ job.progress_message or 'Waiting' }}</span></td></tr>{% else %}<tr><td colspan="4"><div class="table-empty">No background operations recorded.</div></td></tr>{% endfor %}</tbody></table></div>
+    </div>
+
+    <div class="record-panel reveal">
+        <div class="record-panel-header"><div><h3>Import history</h3><p>Validation and commit outcomes</p></div><span class="count-chip">{{ imports_nav.page.total }} total</span></div>
         <div class="table-wrap">
             <table class="data-table">
                 <thead><tr><th>Type</th><th>Status</th><th>Progress</th><th>Valid</th><th>Failed</th><th>File</th><th>Actions</th></tr></thead>
@@ -271,6 +281,7 @@
                 </tbody>
             </table>
         </div>
+        {{ render_pagination(imports_nav, 'imports') }}
     </div>
 </section>
 {% endblock %}

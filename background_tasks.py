@@ -165,6 +165,14 @@ def generate_report_job(job_id):
 
             delete(artifact_key)
             return
+        from security import record_audit
+
+        record_audit(
+            "seating_report_exported",
+            "seating_run",
+            run_id,
+            after_values={"format": report_format, "background_job_id": job.id},
+        )
         complete_job(job.id, {
             "artifact_key": artifact_key,
             "filename": filename,

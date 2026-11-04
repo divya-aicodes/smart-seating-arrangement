@@ -102,6 +102,10 @@ the versioned write endpoints are planned for the API-security phase.
 
 ## Background-job status
 
+`GET /api/v1/jobs?page=1&per_page=25&type=report_generation&status=running`
+returns a paginated job collection. `type` and `status` are allowlisted; task payloads
+and private artifact keys are excluded.
+
 `GET /api/v1/jobs/{id}` reads progress from PostgreSQL rather than from Redis. The
 response includes job type, state, current and total work, percentage, attempts,
 safe-cancellation state, timestamps, a bounded error message, and the result URL after

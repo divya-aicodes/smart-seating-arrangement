@@ -71,6 +71,7 @@ class TestRestApi(unittest.TestCase):
         contract = self.client.get("/api/v1/openapi.json")
         self.assertEqual(contract.status_code, 200)
         self.assertIn("/jobs/{job_id}", contract.get_json()["paths"])
+        self.assertIn("/jobs", contract.get_json()["paths"])
         self.assertEqual(contract.get_json()["openapi"], "3.1.0")
 
         records = self.client.get("/api/v1/datasets")
@@ -86,6 +87,10 @@ class TestRestApi(unittest.TestCase):
         payload = response.get_json()["data"]
         self.assertEqual(payload["status"], "queued")
         self.assertEqual(payload["progress"]["percentage"], 0.0)
+        listing = self.client.get("/api/v1/jobs?page=1&per_page=10&type=report_generation")
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(listing.get_json()["pagination"]["total"], 1)
+        self.assertEqual(listing.get_json()["data"][0]["id"], job.id)
 
     def test_can_generate_and_page_persisted_synthetic_data(self):
         token = self.csrf_token("/")

@@ -510,11 +510,26 @@ class TestFlaskIntegration(unittest.TestCase):
         excel_res = self.client.get(f"/reports/runs/{run.id}.xlsx")
         self.assertEqual(excel_res.status_code, 200)
         workbook = load_workbook(io.BytesIO(excel_res.data), data_only=False)
-        self.assertEqual(workbook.sheetnames, ["Summary", "Allocations"])
+        self.assertEqual(
+            workbook.sheetnames,
+            [
+                "Summary",
+                "Allocations",
+                "Room Summary",
+                "Subject Summary",
+                "Accessible Seating",
+                "Invigilators",
+                "Validation",
+                "Mathematics",
+            ],
+        )
         self.assertEqual(workbook["Summary"]["A2"].value, "Examination seating report")
         self.assertTrue(workbook["Summary"]["E7"].value.startswith("=COUNTA"))
         self.assertEqual(workbook["Allocations"].max_row, 7)
         self.assertTrue(workbook["Allocations"]["F2"].value.startswith("'="))
+        self.assertEqual(workbook["Room Summary"]["A1"].value, "Room")
+        self.assertEqual(workbook["Subject Summary"]["A1"].value, "Subject")
+        self.assertEqual(workbook["Validation"]["A1"].value, "Proposition")
         self.assertEqual(
             AuditLog.query.filter_by(action="seating_report_exported").count(), 2
         )
@@ -552,6 +567,35 @@ class TestFlaskIntegration(unittest.TestCase):
                 JOB_STORAGE_DIR=previous_storage,
             )
             shutil.rmtree(report_storage, ignore_errors=True)
+
+    def test_administration_registers_render_and_jobs_are_server_paginated(self):
+        db.session.add_all(
+            [
+                BackgroundJob(
+                    task_id=str(uuid4()),
+                    job_type="report_generation",
+                    status="completed",
+                    progress_current=100,
+                    progress_total=100,
+                    payload={"run_id": index + 1, "format": "pdf"},
+                )
+                for index in range(26)
+            ]
+        )
+        db.session.commit()
+        for path in (
+            "/administration",
+            "/administration/academics",
+            "/administration/examinations",
+            "/administration/rooms",
+            "/administration/audit",
+        ):
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200, path)
+        second_page = self.client.get("/administration/jobs?page=2")
+        self.assertEqual(second_page.status_code, 200)
+        self.assertIn(b"Showing 26", second_page.data)
+        self.assertIn(b"of 26", second_page.data)
 
     def test_large_database_optimization_is_queued_by_identifier(self):
         self.client.post(

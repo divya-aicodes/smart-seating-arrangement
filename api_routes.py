@@ -312,6 +312,9 @@ def openapi_document():
             "/imports/{import_id}/errors": {
                 "get": {"summary": "List row-level import errors"}
             },
+            "/jobs": {
+                "get": {"summary": "List durable background jobs with pagination"}
+            },
             "/jobs/{job_id}": {
                 "get": {"summary": "Get durable background-job progress and result"}
             },

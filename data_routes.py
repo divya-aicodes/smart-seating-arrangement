@@ -33,7 +33,8 @@ from background_tasks import enqueue_job
 from extensions import db
 from job_storage import delete as delete_job_object
 from job_storage import put_stream
-from models import DataImport, Dataset, ExamSession, ImportRowError, Room, Student
+from models import BackgroundJob, DataImport, Dataset, ExamSession, ImportRowError, Room, Student
+from pagination import page_navigation, paginate
 from security import record_audit
 
 
@@ -67,26 +68,40 @@ def _form_time(name, label):
 
 @data_bp.get("/data")
 def data_management():
-    datasets = db.session.scalars(
-        select(Dataset).order_by(Dataset.created_at.desc()).limit(50)
-    ).all()
-    sessions = db.session.scalars(
+    dataset_page = paginate(
+        select(Dataset).order_by(Dataset.created_at.desc()),
+        param="dataset_page",
+        per_page=20,
+    )
+    session_page = paginate(
         select(ExamSession)
         .options(selectinload(ExamSession.papers))
-        .order_by(ExamSession.exam_date.desc(), ExamSession.start_time.desc())
-        .limit(50)
-    ).all()
-    rooms = db.session.scalars(
-        select(Room).where(Room.active.is_(True)).order_by(Room.building, Room.room_number)
-    ).all()
-    imports = db.session.scalars(
-        select(DataImport).order_by(DataImport.created_at.desc()).limit(20)
-    ).all()
-    recent_students = db.session.scalars(
+        .order_by(ExamSession.exam_date.desc(), ExamSession.start_time.desc()),
+        param="session_page",
+        per_page=20,
+    )
+    room_page = paginate(
+        select(Room).where(Room.active.is_(True)).order_by(Room.building, Room.room_number),
+        param="room_page",
+        per_page=20,
+    )
+    import_page = paginate(
+        select(DataImport).order_by(DataImport.created_at.desc()),
+        param="import_page",
+        per_page=20,
+    )
+    student_page = paginate(
         select(Student)
         .options(selectinload(Student.dataset))
-        .order_by(Student.created_at.desc(), Student.id.desc())
-        .limit(50)
+        .order_by(Student.created_at.desc(), Student.id.desc()),
+        param="student_page",
+        per_page=25,
+    )
+    dataset_options = db.session.scalars(
+        select(Dataset).order_by(Dataset.created_at.desc()).limit(250)
+    ).all()
+    jobs = db.session.scalars(
+        select(BackgroundJob).order_by(BackgroundJob.created_at.desc()).limit(8)
     ).all()
     stats = {
         "datasets": db.session.scalar(select(func.count()).select_from(Dataset)),
@@ -96,11 +111,18 @@ def data_management():
     }
     return render_template(
         "data_management.html",
-        datasets=datasets,
-        sessions=sessions,
-        rooms=rooms,
-        imports=imports,
-        recent_students=recent_students,
+        datasets=dataset_page.items,
+        sessions=session_page.items,
+        rooms=room_page.items,
+        imports=import_page.items,
+        recent_students=student_page.items,
+        dataset_options=dataset_options,
+        jobs=jobs,
+        datasets_nav=page_navigation(dataset_page),
+        sessions_nav=page_navigation(session_page),
+        rooms_nav=page_navigation(room_page),
+        imports_nav=page_navigation(import_page),
+        students_nav=page_navigation(student_page),
         stats=stats,
         today=date.today().isoformat(),
     )

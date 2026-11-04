@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Administration | SeatPlan{% endblock %}
+{% block content %}
+<section class="page-hero page-shell compact-hero">
+    <div class="reveal"><p class="eyebrow"><span>Institution administration</span></p><h1>Operational overview</h1><p class="hero-lead">Inspect the academic structure, examination schedule, room inventory, background work and audit trail stored in the database.</p></div>
+    <div class="hero-actions reveal"><a class="button button-primary" href="{{ url_for('data.data_management') }}">Add records</a></div>
+</section>
+<section class="metric-grid page-shell" aria-label="Administration totals">
+    <article class="metric-card reveal"><span class="metric-index">01</span><strong>{{ stats.institutions }}</strong><p>Institutions</p></article>
+    <article class="metric-card reveal"><span class="metric-index">02</span><strong>{{ stats.students }}</strong><p>Students</p></article>
+    <article class="metric-card reveal"><span class="metric-index">03</span><strong>{{ stats.exam_sessions }}</strong><p>Exam sessions</p></article>
+    <article class="metric-card reveal"><span class="metric-index">04</span><strong>{{ stats.rooms }}</strong><p>Rooms</p></article>
+</section>
+<section class="page-shell admin-link-grid" aria-label="Administration sections">
+    <a class="admin-link-card reveal" href="{{ url_for('administration.academics') }}"><span>Academic structure</span><strong>Departments, sections and subjects</strong><small>Inspect normalized academic records →</small></a>
+    <a class="admin-link-card reveal" href="{{ url_for('administration.examinations') }}"><span>Examinations</span><strong>Sessions, papers and registrations</strong><small>Review verified examination scope →</small></a>
+    <a class="admin-link-card reveal" href="{{ url_for('administration.rooms') }}"><span>Physical inventory</span><strong>Rooms, capacity and accessibility</strong><small>Inspect active seat records →</small></a>
+    <a class="admin-link-card reveal" href="{{ url_for('administration.jobs') }}"><span>Background work</span><strong>{{ stats.background_jobs }} durable jobs</strong><small>Follow progress and recovery state →</small></a>
+    <a class="admin-link-card reveal" href="{{ url_for('administration.audit') }}"><span>Governance</span><strong>Audit history</strong><small>Review recorded state changes →</small></a>
+    <a class="admin-link-card reveal" href="{{ url_for('reports.dashboard') }}"><span>Reporting</span><strong>{{ stats.seating_runs }} seating runs</strong><small>Open validated outputs →</small></a>
+</section>
+<section class="page-shell records-split admin-recent-grid">
+    <div class="record-panel reveal"><div class="record-panel-header"><div><h3>Recent background work</h3><p>PostgreSQL-backed job state</p></div><a class="text-link" href="{{ url_for('administration.jobs') }}">View all</a></div><div class="table-wrap"><table class="data-table compact-table"><thead><tr><th>Job</th><th>Type</th><th>Status</th><th>Progress</th></tr></thead><tbody>{% for job in jobs %}<tr data-job-row data-job-url="{{ url_for('jobs.status', job_id=job.id) }}"><td><a class="run-link" href="{{ url_for('jobs.detail', job_id=job.id) }}">#{{ job.id }}</a></td><td>{{ job.job_type | replace('_', ' ') }}</td><td><span data-job-status class="status-text status-{{ job.status }}">{{ job.status }}</span></td><td><span data-job-progress>{{ ((job.progress_current * 100 / job.progress_total) | round(1)) if job.progress_total else 0 }}%</span></td></tr>{% else %}<tr><td colspan="4"><div class="table-empty">No background jobs recorded.</div></td></tr>{% endfor %}</tbody></table></div></div>
+    <div class="record-panel reveal"><div class="record-panel-header"><div><h3>Recent audit activity</h3><p>Last persisted state changes</p></div><a class="text-link" href="{{ url_for('administration.audit') }}">View all</a></div><div class="table-wrap"><table class="data-table compact-table"><thead><tr><th>Action</th><th>Entity</th><th>Time</th></tr></thead><tbody>{% for item in audits %}<tr><td>{{ item.action | replace('_', ' ') }}</td><td>{{ item.entity_type }} #{{ item.entity_id }}</td><td>{{ item.created_at }}</td></tr>{% else %}<tr><td colspan="3"><div class="table-empty">No audit events recorded.</div></td></tr>{% endfor %}</tbody></table></div></div>
+</section>
+{% endblock %}
