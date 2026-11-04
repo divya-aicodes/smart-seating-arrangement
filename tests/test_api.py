@@ -13,9 +13,12 @@ from models import (
     Dataset,
     Exam,
     ExamRegistration,
+    ExamSession,
     Seat,
     SeatAllocation,
     SeatingRun,
+    Student,
+    Subject,
 )
 
 
@@ -85,6 +88,12 @@ class TestRestApi(unittest.TestCase):
         self.assertTrue(response.headers["Location"].endswith(f"/datasets/{body['dataset']['id']}"))
         self.assertEqual(Dataset.query.count(), 1)
         self.assertEqual(AuditLog.query.filter_by(action="synthetic_dataset_generated_api").count(), 1)
+        self.assertEqual(ExamSession.query.count(), 1)
+        session_payload = self.client.get("/api/v1/exam-sessions").get_json()
+        self.assertEqual(session_payload["pagination"]["total"], 1)
+        session_id = session_payload["data"][0]["id"]
+        session_detail = self.client.get(f"/api/v1/exam-sessions/{session_id}")
+        self.assertEqual(len(session_detail.get_json()["data"]["papers"]), 2)
 
         listing = self.client.get(
             "/api/v1/datasets?source_type=synthetic&page=1&per_page=1"
@@ -136,6 +145,7 @@ class TestRestApi(unittest.TestCase):
         seat = Seat.query.order_by(Seat.id).first()
         run = SeatingRun(
             exam_id=exam.id,
+            exam_session_id=exam.exam_session_id,
             solver_version="api-test-v1",
             solver_config={"adjacency_rule": "orthogonal"},
             validation_result={"overall_valid": True, "propositions": []},
@@ -174,6 +184,68 @@ class TestRestApi(unittest.TestCase):
         self.assertEqual(body["pagination"]["total"], 1)
         self.assertEqual(body["data"][0]["student"]["id"], registration.student_id)
         self.assertEqual(body["data"][0]["hard_conflict"], False)
+
+    def test_bulk_registration_rejects_overlapping_verified_session(self):
+        dataset, exam = generate_synthetic_dataset(
+            dataset_name="Conflict API Dataset",
+            dataset_version="v1",
+            seed=117,
+            student_count=2,
+            class_count=2,
+            subject_count=1,
+            room_count=1,
+            rows_per_room=1,
+            benches_per_row=1,
+            seats_per_bench=2,
+            exam_date=date(2026, 12, 6),
+        )
+        subject = Subject(
+            code="SYN-CONFLICT-02",
+            name="Synthetic Conflict Paper",
+            source_type="synthetic",
+            dataset=dataset,
+        )
+        db.session.add(subject)
+        db.session.commit()
+        token = self.csrf_token("/")
+
+        session_response = self.client.post(
+            "/api/v1/exam-sessions",
+            json={
+                "dataset_id": dataset.id,
+                "exam_date": "2026-12-06",
+                "start_time": "11:00",
+                "end_time": "13:00",
+                "session_name": "Overlapping Session",
+                "academic_year": "2026-27",
+            },
+            headers={"X-CSRF-Token": token},
+        )
+        self.assertEqual(session_response.status_code, 201, session_response.get_data(as_text=True))
+        session_id = session_response.get_json()["data"]["id"]
+        paper_response = self.client.post(
+            f"/api/v1/exam-sessions/{session_id}/papers",
+            json={"subject_id": subject.id},
+            headers={"X-CSRF-Token": token},
+        )
+        self.assertEqual(paper_response.status_code, 201, paper_response.get_data(as_text=True))
+        paper_id = paper_response.get_json()["data"]["id"]
+        student = Student.query.order_by(Student.id).first()
+
+        conflict = self.client.post(
+            "/api/v1/exam-registrations/bulk",
+            json={
+                "verification_source": "controller_of_examinations",
+                "registrations": [{"student_id": student.id, "exam_id": paper_id}],
+            },
+            headers={"X-CSRF-Token": token},
+        )
+        self.assertEqual(conflict.status_code, 422)
+        self.assertEqual(conflict.get_json()["error"]["code"], "registration_conflict")
+        self.assertEqual(
+            ExamRegistration.query.filter_by(student_id=student.id).count(),
+            1,
+        )
 
 
 if __name__ == "__main__":

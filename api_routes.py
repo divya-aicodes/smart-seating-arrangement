@@ -2,26 +2,36 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, time
 from typing import Any
 
 from flask import Blueprint, jsonify, request, url_for
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
 
 from data_service import DataValidationError, generate_synthetic_dataset
 from database_service import PersistenceError, publish_seating_run
+from exam_service import (
+    AcademicValidationError,
+    create_exam_paper,
+    create_exam_session,
+    register_students_for_session,
+)
 from extensions import db
 from models import (
     Dataset,
     DataImport,
     Exam,
     ExamRegistration,
+    ExamSession,
     ImportRowError,
     Room,
     Seat,
     SeatAllocation,
     SeatingRun,
+    Student,
+    Subject,
 )
 from security import record_audit
 
@@ -122,22 +132,41 @@ def _dataset_json(dataset: Dataset) -> dict[str, Any]:
 
 
 def _exam_json(exam: Exam) -> dict[str, Any]:
+    session = exam.session
     return {
         "id": exam.id,
+        "exam_session_id": exam.exam_session_id,
         "dataset_id": exam.dataset_id,
         "subject": {
             "id": exam.subject.id,
             "code": exam.subject.code,
             "name": exam.subject.name,
         },
-        "exam_date": _iso(exam.exam_date),
-        "start_time": _iso(exam.start_time),
-        "end_time": _iso(exam.end_time),
-        "session_name": exam.session_name,
-        "academic_year": exam.academic_year,
+        "exam_date": _iso(session.exam_date),
+        "start_time": _iso(session.start_time),
+        "end_time": _iso(session.end_time),
+        "session_name": session.session_name,
+        "academic_year": session.academic_year,
         "status": exam.status,
         "source_type": exam.source_type,
     }
+
+
+def _session_json(session: ExamSession, *, include_papers: bool = False) -> dict[str, Any]:
+    payload = {
+        "id": session.id,
+        "dataset_id": session.dataset_id,
+        "exam_date": _iso(session.exam_date),
+        "start_time": _iso(session.start_time),
+        "end_time": _iso(session.end_time),
+        "session_name": session.session_name,
+        "academic_year": session.academic_year,
+        "status": session.status,
+        "source_type": session.source_type,
+    }
+    if include_papers:
+        payload["papers"] = [_exam_json(paper) for paper in session.papers]
+    return payload
 
 
 def _room_json(room: Room) -> dict[str, Any]:
@@ -162,6 +191,7 @@ def _run_json(run: SeatingRun, *, allocation_count: int | None = None) -> dict[s
     payload = {
         "id": run.id,
         "exam_id": run.exam_id,
+        "exam_session_id": run.exam_session_id,
         "status": run.status,
         "solver_version": run.solver_version,
         "solver_config": run.solver_config,
@@ -270,6 +300,19 @@ def openapi_document():
             "/imports/{import_id}/errors": {
                 "get": {"summary": "List row-level import errors"}
             },
+            "/exam-sessions": {
+                "get": {"summary": "List examination sessions"},
+                "post": {"summary": "Create an examination session"},
+            },
+            "/exam-sessions/{session_id}": {
+                "get": {"summary": "Get a session and its papers"}
+            },
+            "/exam-sessions/{session_id}/papers": {
+                "post": {"summary": "Add a verified subject paper to a session"}
+            },
+            "/exam-registrations/bulk": {
+                "post": {"summary": "Create verified student-paper registrations"}
+            },
             "/exams": {"get": {"summary": "List persisted exams"}},
             "/exams/{exam_id}": {"get": {"summary": "Get a persisted exam"}},
             "/rooms": {"get": {"summary": "List persisted rooms"}},
@@ -343,6 +386,11 @@ def dataset_detail(dataset_id: int):
         "exams": db.session.scalar(
             select(func.count()).select_from(Exam).where(Exam.dataset_id == dataset_id)
         ) or 0,
+        "exam_sessions": db.session.scalar(
+            select(func.count())
+            .select_from(ExamSession)
+            .where(ExamSession.dataset_id == dataset_id)
+        ) or 0,
         "rooms": db.session.scalar(
             select(func.count()).select_from(Room).where(Room.dataset_id == dataset_id)
         ) or 0,
@@ -396,7 +444,7 @@ def create_synthetic_dataset():
 def exams():
     statement = (
         select(Exam)
-        .options(joinedload(Exam.subject))
+        .options(joinedload(Exam.subject), joinedload(Exam.session))
         .order_by(Exam.exam_date.desc(), Exam.start_time.desc(), Exam.id.desc())
     )
     dataset_id, error = _positive_id_query("dataset_id")
@@ -415,7 +463,9 @@ def exams():
 @api_bp.get("/exams/<int:exam_id>")
 def exam_detail(exam_id: int):
     exam = db.session.scalar(
-        select(Exam).where(Exam.id == exam_id).options(joinedload(Exam.subject))
+        select(Exam)
+        .where(Exam.id == exam_id)
+        .options(joinedload(Exam.subject), joinedload(Exam.session))
     )
     if exam is None:
         return _error("not_found", "The requested exam does not exist.", 404)
@@ -424,6 +474,182 @@ def exam_detail(exam_id: int):
         select(func.count()).select_from(ExamRegistration).where(ExamRegistration.exam_id == exam.id)
     ) or 0
     return jsonify({"data": payload})
+
+
+@api_bp.get("/exam-sessions")
+def exam_sessions():
+    statement = select(ExamSession).order_by(
+        ExamSession.exam_date.desc(), ExamSession.start_time.desc(), ExamSession.id.desc()
+    )
+    dataset_id, error = _positive_id_query("dataset_id")
+    if error:
+        return error
+    status, error = _enum_query("status", {"draft", "scheduled", "completed", "cancelled"})
+    if error:
+        return error
+    if dataset_id:
+        statement = statement.where(ExamSession.dataset_id == dataset_id)
+    if status:
+        statement = statement.where(ExamSession.status == status)
+    return _page_response(statement, _session_json)
+
+
+@api_bp.get("/exam-sessions/<int:session_id>")
+def exam_session_detail(session_id: int):
+    session = db.session.scalar(
+        select(ExamSession)
+        .where(ExamSession.id == session_id)
+        .options(joinedload(ExamSession.papers).joinedload(Exam.subject))
+    )
+    if session is None:
+        return _error("not_found", "The requested exam session does not exist.", 404)
+    return jsonify({"data": _session_json(session, include_papers=True)})
+
+
+def _required_json_id(payload: dict[str, Any], name: str) -> int:
+    value = payload.get(name)
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise AcademicValidationError(f"{name} must be a positive integer.")
+    return value
+
+
+def _required_json_time(payload: dict[str, Any], name: str) -> time:
+    raw = str(payload.get(name, "")).strip()
+    try:
+        return time.fromisoformat(raw)
+    except ValueError as exc:
+        raise AcademicValidationError(f"{name} must use HH:MM or HH:MM:SS format.") from exc
+
+
+@api_bp.post("/exam-sessions")
+def create_exam_session_api():
+    payload, error = _json_body()
+    if error:
+        return error
+    try:
+        dataset = db.session.get(Dataset, _required_json_id(payload, "dataset_id"))
+        if dataset is None:
+            return _error("not_found", "The selected dataset does not exist.", 404)
+        try:
+            exam_date = date.fromisoformat(str(payload.get("exam_date", "")).strip())
+        except ValueError as exc:
+            raise AcademicValidationError("exam_date must use YYYY-MM-DD format.") from exc
+        session = create_exam_session(
+            dataset=dataset,
+            exam_date=exam_date,
+            start_time=_required_json_time(payload, "start_time"),
+            end_time=_required_json_time(payload, "end_time"),
+            session_name=str(payload.get("session_name", "")),
+            academic_year=str(payload.get("academic_year", "")),
+            status=str(payload.get("status", "scheduled")),
+        )
+        db.session.commit()
+        record_audit(
+            "exam_session_created_api",
+            "exam_session",
+            session.id,
+            after_values={"dataset_id": session.dataset_id, "status": session.status},
+        )
+    except AcademicValidationError as exc:
+        db.session.rollback()
+        return _error("validation_error", str(exc), 422)
+    except IntegrityError:
+        db.session.rollback()
+        return _error("database_conflict", "The examination session already exists.", 409)
+    response = jsonify({"data": _session_json(session)})
+    response.status_code = 201
+    response.headers["Location"] = url_for("api.exam_session_detail", session_id=session.id)
+    return response
+
+
+@api_bp.post("/exam-sessions/<int:session_id>/papers")
+def create_exam_paper_api(session_id: int):
+    payload, error = _json_body()
+    if error:
+        return error
+    session = db.session.get(ExamSession, session_id)
+    if session is None:
+        return _error("not_found", "The selected exam session does not exist.", 404)
+    try:
+        subject = db.session.get(Subject, _required_json_id(payload, "subject_id"))
+        if subject is None:
+            return _error("not_found", "The selected subject does not exist.", 404)
+        paper = create_exam_paper(session=session, subject=subject)
+        db.session.commit()
+        record_audit(
+            "exam_paper_created_api",
+            "exam",
+            paper.id,
+            after_values={"exam_session_id": session.id, "subject_id": subject.id},
+        )
+    except AcademicValidationError as exc:
+        db.session.rollback()
+        return _error("validation_error", str(exc), 422)
+    except IntegrityError:
+        db.session.rollback()
+        return _error("database_conflict", "The subject paper already exists in this session.", 409)
+    response = jsonify({"data": _exam_json(paper)})
+    response.status_code = 201
+    return response
+
+
+@api_bp.post("/exam-registrations/bulk")
+def create_exam_registrations_bulk():
+    payload, error = _json_body()
+    if error:
+        return error
+    items = payload.get("registrations")
+    if not isinstance(items, list) or not 1 <= len(items) <= 5_000:
+        return _error(
+            "validation_error",
+            "registrations must be an array containing between 1 and 5,000 items.",
+            422,
+        )
+    source = str(payload.get("verification_source", "api_verified_registration"))
+    try:
+        grouped: dict[int, list[tuple[Student, Exam]]] = {}
+        for item in items:
+            if not isinstance(item, dict):
+                raise AcademicValidationError("Every registration must be a JSON object.")
+            student = db.session.get(Student, _required_json_id(item, "student_id"))
+            paper = db.session.get(Exam, _required_json_id(item, "exam_id"))
+            if student is None or paper is None:
+                raise AcademicValidationError("Every registration must reference an existing student and paper.")
+            grouped.setdefault(paper.exam_session_id, []).append((student, paper))
+        registrations = []
+        for session_id in sorted(grouped):
+            registrations.extend(
+                register_students_for_session(
+                    grouped[session_id], verification_source=source
+                )
+            )
+        db.session.commit()
+        record_audit(
+            "exam_registrations_verified_api",
+            "exam_session",
+            next(iter(grouped)),
+            after_values={
+                "registration_count": len(registrations),
+                "session_count": len(grouped),
+                "verification_source": source[:80],
+            },
+        )
+    except AcademicValidationError as exc:
+        db.session.rollback()
+        return _error("registration_conflict", str(exc), 422)
+    except IntegrityError:
+        db.session.rollback()
+        return _error(
+            "registration_conflict",
+            "A competing registration changed this session; reload and try again.",
+            409,
+        )
+    return jsonify({
+        "data": {
+            "created_or_verified": len(registrations),
+            "registration_ids": [item.id for item in registrations],
+        }
+    }), 201
 
 
 @api_bp.get("/rooms")
@@ -500,7 +726,10 @@ def seating_run_allocations(run_id: int):
         )
     registrations = db.session.scalars(
         select(ExamRegistration)
-        .where(ExamRegistration.exam_id == run.exam_id)
+        .where(
+            ExamRegistration.exam_session_id == run.exam_session_id,
+            ExamRegistration.verification_status == "verified",
+        )
         .options(joinedload(ExamRegistration.subject))
     ).all()
     subjects = {

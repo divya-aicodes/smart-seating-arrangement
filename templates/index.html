@@ -49,14 +49,14 @@
             <fieldset class="source-switch">
                 <legend class="sr-only">Data source</legend>
                 <label class="source-option">
-                    <input type="radio" name="data_mode" value="database" {{ 'checked' if available_exams and available_rooms else '' }}>
+                    <input type="radio" name="data_mode" value="database" {{ 'checked' if available_sessions and available_rooms else '' }}>
                     <span class="source-option-body">
                         <span class="source-option-mark" aria-hidden="true"></span>
                         <span><strong>Connected records</strong><small>Persist the run and enable verified reports</small></span>
                     </span>
                 </label>
                 <label class="source-option">
-                    <input type="radio" name="data_mode" value="manual" {{ 'checked' if not available_exams or not available_rooms else '' }}>
+                    <input type="radio" name="data_mode" value="manual" {{ 'checked' if not available_sessions or not available_rooms else '' }}>
                     <span class="source-option-body">
                         <span class="source-option-mark" aria-hidden="true"></span>
                         <span><strong>One-time CSV</strong><small>Process temporary records without storing them</small></span>
@@ -65,14 +65,14 @@
             </fieldset>
 
             <div id="database-source-fields" class="source-panel">
-                {% if available_exams and available_rooms %}
+                {% if available_sessions and available_rooms %}
                 <div class="field-grid field-grid-two">
                     <div class="field-group">
-                        <label for="exam_id">Exam session</label>
-                        <select id="exam_id" name="exam_id" class="field-control">
-                            {% for exam in available_exams %}
-                            <option value="{{ exam.id }}" data-dataset-id="{{ exam.dataset_id }}">
-                                {{ exam.exam_date }} · {{ exam.session_name }} · {{ exam.dataset.name if exam.dataset else exam.subject.name }} [{{ exam.source_type | upper }}]
+                        <label for="exam_session_id">Exam session</label>
+                        <select id="exam_session_id" name="exam_session_id" class="field-control">
+                            {% for session in available_sessions %}
+                            <option value="{{ session.id }}" data-dataset-id="{{ session.dataset_id }}">
+                                {{ session.exam_date }} · {{ session.session_name }} · {{ session.papers | length }} paper{{ '' if session.papers | length == 1 else 's' }} · {{ session.dataset.name if session.dataset else 'Institutional records' }} [{{ session.source_type | upper }}]
                             </option>
                             {% endfor %}
                         </select>

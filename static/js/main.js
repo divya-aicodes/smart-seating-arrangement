@@ -90,7 +90,7 @@ function initSourceMode() {
 }
 
 function initDatasetRoomFilter() {
-    const examSelect = document.getElementById("exam_id");
+    const examSelect = document.getElementById("exam_session_id") || document.getElementById("exam_id");
     const roomSelect = document.getElementById("room_ids");
     if (!examSelect || !roomSelect) return;
 

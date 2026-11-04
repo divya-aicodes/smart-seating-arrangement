@@ -15,12 +15,17 @@ from typing import Any
 from sqlalchemy import insert, select
 from sqlalchemy.exc import IntegrityError
 
+from exam_service import (
+    AcademicValidationError,
+    create_exam_paper,
+    create_exam_session,
+    register_students_for_session,
+)
 from extensions import db
 from models import (
     DataImport,
     Dataset,
     Exam,
-    ExamRegistration,
     ImportRowError,
     ImportStagingStudent,
     Invigilator,
@@ -551,24 +556,27 @@ def commit_staged_student_import(import_id: int) -> tuple[Dataset, Exam, DataImp
             subjects[code] = subject
         db.session.flush()
 
-        primary_row = db.session.scalar(
-            select(ImportStagingStudent)
-            .where(ImportStagingStudent.data_import_id == import_id)
-            .order_by(ImportStagingStudent.row_number)
-            .limit(1)
-        )
-        exam = Exam(
-            subject=subjects[primary_row.subject_code],
+        session = create_exam_session(
+            dataset=dataset,
             exam_date=date.fromisoformat(options["exam_date"]),
             start_time=time.fromisoformat(options["start_time"]),
             end_time=time.fromisoformat(options["end_time"]),
             session_name=options["session_name"],
             academic_year=options["academic_year"],
             status="scheduled",
-            source_type="real",
-            dataset=dataset,
         )
-        db.session.add(exam)
+        papers = {
+            code: create_exam_paper(session=session, subject=subject)
+            for code, subject in subjects.items()
+        }
+        exam = papers[
+            db.session.scalar(
+                select(ImportStagingStudent.subject_code)
+                .where(ImportStagingStudent.data_import_id == import_id)
+                .order_by(ImportStagingStudent.row_number)
+                .limit(1)
+            )
+        ]
 
         for staged_chunk in _staging_chunks(import_id, import_record.chunk_size):
             codes = [row.student_code for row in staged_chunk]
@@ -578,6 +586,7 @@ def commit_staged_student_import(import_id: int) -> tuple[Dataset, Exam, DataImp
                     select(Student).where(Student.student_code.in_(codes))
                 ).all()
             }
+            registration_entries = []
             for row in staged_chunk:
                 student = existing_students.get(row.student_code)
                 if student is None:
@@ -593,15 +602,13 @@ def commit_staged_student_import(import_id: int) -> tuple[Dataset, Exam, DataImp
                 student.accessibility_required = row.accessibility_required
                 student.active = True
                 student.dataset = dataset
-                db.session.add(
-                    ExamRegistration(
-                        exam=exam,
-                        student=student,
-                        subject=subjects[row.subject_code],
-                        status="eligible",
-                    )
-                )
+                registration_entries.append((student, papers[row.subject_code]))
             db.session.flush()
+            for offset in range(0, len(registration_entries), 500):
+                register_students_for_session(
+                    registration_entries[offset:offset + 500],
+                    verification_source="csv_subject_code",
+                )
 
         import_record.dataset = dataset
         import_record.status = "completed"
@@ -612,14 +619,14 @@ def commit_staged_student_import(import_id: int) -> tuple[Dataset, Exam, DataImp
         }
         db.session.commit()
         return dataset, exam, import_record
-    except (DataValidationError, IntegrityError) as exc:
+    except (DataValidationError, AcademicValidationError, IntegrityError) as exc:
         db.session.rollback()
         import_record = db.session.get(DataImport, import_id)
         import_record.status = "validated"
         import_record.error_report = {"message": str(exc)[:1000], "commit_failed": True}
         db.session.commit()
-        if isinstance(exc, DataValidationError):
-            raise
+        if isinstance(exc, (DataValidationError, AcademicValidationError)):
+            raise DataValidationError(str(exc)) from exc
         raise DataValidationError("The import violates an existing database constraint.") from exc
     except Exception:
         db.session.rollback()
@@ -746,22 +753,23 @@ def generate_synthetic_dataset(
             subjects.append(subject)
         db.session.flush()
 
-        exam = Exam(
-            subject=subjects[0],
+        session = create_exam_session(
+            dataset=dataset,
             exam_date=exam_date,
             start_time=time(9, 0),
             end_time=time(12, 0),
             session_name="Synthetic Morning Session",
             academic_year=f"{exam_date.year}-{str(exam_date.year + 1)[-2:]}",
             status="scheduled",
-            source_type="synthetic",
-            dataset=dataset,
         )
-        db.session.add(exam)
+        papers = [create_exam_paper(session=session, subject=subject) for subject in subjects]
+        exam = papers[0]
 
+        registration_entries = []
         for index in range(1, student_count + 1):
             class_number = ((index - 1) % class_count) + 1
-            subject = subjects[rng.randrange(subject_count)]
+            subject_index = rng.randrange(subject_count)
+            subject = subjects[subject_index]
             student = Student(
                 student_code=f"SYN-{token}-{index:05d}",
                 full_name=f"Synthetic Student {index:05d}",
@@ -773,13 +781,13 @@ def generate_synthetic_dataset(
                 dataset=dataset,
             )
             db.session.add(student)
-            db.session.add(
-                ExamRegistration(
-                    exam=exam,
-                    student=student,
-                    subject=subject,
-                    status="eligible",
-                )
+            registration_entries.append((student, papers[subject_index]))
+
+        db.session.flush()
+        for offset in range(0, len(registration_entries), 500):
+            register_students_for_session(
+                registration_entries[offset:offset + 500],
+                verification_source="synthetic_generator",
             )
 
         for room_index in range(1, room_count + 1):
@@ -836,8 +844,10 @@ def generate_synthetic_dataset(
         )
         db.session.commit()
         return dataset, exam
-    except IntegrityError as exc:
+    except (IntegrityError, AcademicValidationError) as exc:
         db.session.rollback()
+        if isinstance(exc, AcademicValidationError):
+            raise DataValidationError(str(exc)) from exc
         raise DataValidationError(
             "The generated dataset conflicts with existing identifiers. Change its name, version, or seed."
         ) from exc

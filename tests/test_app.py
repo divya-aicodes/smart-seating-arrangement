@@ -22,6 +22,8 @@ from models import (
     DataImport,
     Dataset,
     Exam,
+    ExamRegistration,
+    ExamSession,
     ImportRowError,
     ImportStagingStudent,
     Room,
@@ -108,7 +110,14 @@ class TestFlaskIntegration(unittest.TestCase):
         dataset = Dataset.query.one()
         self.assertEqual(dataset.source_type, "real")
         self.assertEqual(Student.query.count(), 2)
-        self.assertEqual(Exam.query.count(), 1)
+        self.assertEqual(ExamSession.query.count(), 1)
+        self.assertEqual(Exam.query.count(), 2)
+        self.assertEqual(ExamRegistration.query.count(), 2)
+        self.assertTrue(all(
+            registration.verification_status == "verified"
+            and registration.subject_id == registration.exam.subject_id
+            for registration in ExamRegistration.query.all()
+        ))
         self.assertEqual(DataImport.query.one().status, "completed")
 
         data_page = self.client.get("/data")
@@ -265,7 +274,8 @@ class TestFlaskIntegration(unittest.TestCase):
         )
         self.assertEqual(res.status_code, 302)
         dataset = Dataset.query.one()
-        exam = Exam.query.one()
+        exam = Exam.query.order_by(Exam.id).first()
+        exam_session = ExamSession.query.one()
         room = Room.query.one()
         self.assertEqual(dataset.source_type, "synthetic")
         self.assertEqual(dataset.generation_seed, 99)
@@ -281,7 +291,7 @@ class TestFlaskIntegration(unittest.TestCase):
             "/assign",
             data={
                 "data_mode": "database",
-                "exam_id": str(exam.id),
+                "exam_session_id": str(exam_session.id),
                 "room_ids": str(room.id),
                 "invigilator_ratio": "20",
                 "adjacency_rule": "orthogonal",
@@ -346,14 +356,14 @@ class TestFlaskIntegration(unittest.TestCase):
         )
         dataset_a = Dataset.query.filter_by(name="Dataset A").one()
         dataset_b = Dataset.query.filter_by(name="Dataset B").one()
-        exam_a = Exam.query.filter_by(dataset_id=dataset_a.id).one()
+        session_a = ExamSession.query.filter_by(dataset_id=dataset_a.id).one()
         room_b = Room.query.filter_by(dataset_id=dataset_b.id).one()
 
         res = self.client.post(
             "/assign",
             data={
                 "data_mode": "database",
-                "exam_id": str(exam_a.id),
+                "exam_session_id": str(session_a.id),
                 "room_ids": str(room_b.id),
                 "invigilator_ratio": "20",
                 "adjacency_rule": "orthogonal",

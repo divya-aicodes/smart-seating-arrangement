@@ -27,7 +27,7 @@ from data_service import (
     stage_student_import,
 )
 from extensions import db
-from models import DataImport, Dataset, Exam, ImportRowError, Room, Student
+from models import DataImport, Dataset, ExamSession, ImportRowError, Room, Student
 from security import record_audit
 
 
@@ -64,8 +64,11 @@ def data_management():
     datasets = db.session.scalars(
         select(Dataset).order_by(Dataset.created_at.desc()).limit(50)
     ).all()
-    exams = db.session.scalars(
-        select(Exam).order_by(Exam.exam_date.desc(), Exam.start_time.desc()).limit(50)
+    sessions = db.session.scalars(
+        select(ExamSession)
+        .options(selectinload(ExamSession.papers))
+        .order_by(ExamSession.exam_date.desc(), ExamSession.start_time.desc())
+        .limit(50)
     ).all()
     rooms = db.session.scalars(
         select(Room).where(Room.active.is_(True)).order_by(Room.building, Room.room_number)
@@ -82,13 +85,13 @@ def data_management():
     stats = {
         "datasets": db.session.scalar(select(func.count()).select_from(Dataset)),
         "students": db.session.scalar(select(func.count()).select_from(Student)),
-        "exams": db.session.scalar(select(func.count()).select_from(Exam)),
+        "exams": db.session.scalar(select(func.count()).select_from(ExamSession)),
         "rooms": db.session.scalar(select(func.count()).select_from(Room)),
     }
     return render_template(
         "data_management.html",
         datasets=datasets,
-        exams=exams,
+        sessions=sessions,
         rooms=rooms,
         imports=imports,
         recent_students=recent_students,
@@ -160,7 +163,8 @@ def commit_import(import_id: int):
         dataset, exam, import_record = commit_staged_student_import(import_id)
         flash(
             f"Committed {import_record.valid_rows:,} verified rows to '{dataset.name}' "
-            f"and created exam session #{exam.id}. "
+            f"and created exam session #{exam.exam_session_id} with "
+            f"{len(exam.session.papers)} paper(s). "
             f"{import_record.invalid_rows:,} invalid rows remain in the error report.",
             "success",
         )
@@ -170,6 +174,7 @@ def commit_import(import_id: int):
             import_record.id,
             after_values={
                 "dataset_id": dataset.id,
+                "exam_session_id": exam.exam_session_id,
                 "exam_id": exam.id,
                 "valid_rows": import_record.valid_rows,
                 "invalid_rows": import_record.invalid_rows,
@@ -242,14 +247,19 @@ def generate_synthetic():
         )
         flash(
             f"Generated reproducible synthetic dataset '{dataset.name}' with seed "
-            f"{dataset.generation_seed}. Exam session #{exam.id} is ready.",
+            f"{dataset.generation_seed}. Exam session #{exam.exam_session_id} with "
+            f"{len(exam.session.papers)} paper(s) is ready.",
             "success",
         )
         record_audit(
             "synthetic_dataset_generated",
             "dataset",
             dataset.id,
-            after_values={"exam_id": exam.id, "seed": dataset.generation_seed},
+            after_values={
+                "exam_session_id": exam.exam_session_id,
+                "exam_id": exam.id,
+                "seed": dataset.generation_seed,
+            },
         )
     except DataValidationError as exc:
         flash(str(exc), "error")

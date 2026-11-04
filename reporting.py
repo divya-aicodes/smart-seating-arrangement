@@ -26,7 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 
 from extensions import db
-from models import Exam, ExamRegistration, Seat, SeatAllocation, SeatingRun
+from models import Exam, ExamRegistration, ExamSession, Seat, SeatAllocation, SeatingRun
 
 
 REPORTABLE_STATUSES = {"completed", "published"}
@@ -53,6 +53,7 @@ def load_report_data(run_id: int) -> dict[str, Any]:
         .options(
             joinedload(SeatingRun.exam).joinedload(Exam.dataset),
             joinedload(SeatingRun.exam).joinedload(Exam.subject),
+            joinedload(SeatingRun.session).joinedload(ExamSession.dataset),
             joinedload(SeatingRun.allocations).joinedload(SeatAllocation.student),
             joinedload(SeatingRun.allocations)
             .joinedload(SeatAllocation.seat)
@@ -68,7 +69,10 @@ def load_report_data(run_id: int) -> dict[str, Any]:
 
     registrations = db.session.scalars(
         select(ExamRegistration)
-        .where(ExamRegistration.exam_id == run.exam_id)
+        .where(
+            ExamRegistration.exam_session_id == run.exam_session_id,
+            ExamRegistration.verification_status == "verified",
+        )
         .options(joinedload(ExamRegistration.subject))
     ).all()
     registration_subjects = {
@@ -112,7 +116,8 @@ def load_report_data(run_id: int) -> dict[str, Any]:
     return {
         "run": run,
         "exam": run.exam,
-        "dataset": run.exam.dataset,
+        "session": run.session,
+        "dataset": run.session.dataset,
         "rows": rows,
         "allocation_count": len(rows),
         "room_count": len(room_ids),
@@ -125,7 +130,7 @@ def load_report_data(run_id: int) -> dict[str, Any]:
 
 def build_pdf_report(report: dict[str, Any]) -> BytesIO:
     run = report["run"]
-    exam = report["exam"]
+    exam = report["session"]
     dataset = report["dataset"]
     buffer = BytesIO()
     document = SimpleDocTemplate(
@@ -292,7 +297,7 @@ def build_pdf_report(report: dict[str, Any]) -> BytesIO:
 
 def build_excel_report(report: dict[str, Any]) -> BytesIO:
     run = report["run"]
-    exam = report["exam"]
+    exam = report["session"]
     dataset = report["dataset"]
     workbook = Workbook()
     summary = workbook.active

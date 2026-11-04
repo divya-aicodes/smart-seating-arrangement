@@ -1,7 +1,7 @@
 """Database schema, integrity, and transactional seating-run tests."""
 
 import unittest
-from datetime import date, time
+from datetime import date, datetime, time, timezone
 
 from flask import Flask
 from sqlalchemy.exc import IntegrityError
@@ -13,12 +13,19 @@ from database_service import (
     publish_seating_run,
 )
 from extensions import db
+from exam_service import (
+    AcademicValidationError,
+    create_exam_paper,
+    create_exam_session,
+    register_student_for_paper,
+)
 from models import (
     AcademicYear,
     Department,
     Dataset,
     Exam,
     ExamRegistration,
+    ExamSession,
     Institution,
     Room,
     Seat,
@@ -63,6 +70,16 @@ class TestDatabasePersistence(unittest.TestCase):
             dataset=self.dataset,
         )
         self.exam = Exam(
+            session=ExamSession(
+                dataset=self.dataset,
+                exam_date=date(2026, 12, 1),
+                start_time=time(9, 0),
+                end_time=time(12, 0),
+                session_name="Morning",
+                academic_year="2026-27",
+                status="scheduled",
+                source_type="real",
+            ),
             subject=self.subject,
             exam_date=date(2026, 12, 1),
             start_time=time(9, 0),
@@ -70,7 +87,9 @@ class TestDatabasePersistence(unittest.TestCase):
             session_name="Morning",
             academic_year="2026-27",
             status="scheduled",
+            dataset=self.dataset,
         )
+        self.exam_session = self.exam.session
         self.room = Room(
             room_number="A-101",
             building="Academic Block",
@@ -90,8 +109,13 @@ class TestDatabasePersistence(unittest.TestCase):
         )
         self.registration = ExamRegistration(
             exam=self.exam,
+            session=self.exam_session,
             student=self.student,
+            subject=self.subject,
             status="eligible",
+            verification_status="verified",
+            verification_source="test_fixture",
+            verified_at=datetime.now(timezone.utc),
         )
         db.session.add_all([
             self.dataset,
@@ -117,6 +141,7 @@ class TestDatabasePersistence(unittest.TestCase):
             "datasets",
             "departments",
             "exam_registrations",
+            "exam_sessions",
             "exams",
             "institutions",
             "import_row_errors",
@@ -238,7 +263,7 @@ class TestDatabasePersistence(unittest.TestCase):
 
     def test_completed_run_and_allocations_are_transactional(self):
         run = create_seating_run(
-            self.exam.id,
+            self.exam_session.id,
             {"adjacency_rule": "orthogonal"},
             created_by="phase-2-test",
         )
@@ -259,7 +284,7 @@ class TestDatabasePersistence(unittest.TestCase):
         self.assertIsNotNone(published.published_at)
 
     def test_failed_hard_constraint_rolls_back_allocations(self):
-        run = create_seating_run(self.exam.id, {"adjacency_rule": "orthogonal"})
+        run = create_seating_run(self.exam_session.id, {"adjacency_rule": "orthogonal"})
         with self.assertRaises(PersistenceError):
             complete_seating_run(
                 run.id,
@@ -274,6 +299,71 @@ class TestDatabasePersistence(unittest.TestCase):
         persisted = db.session.get(SeatingRun, run.id)
         self.assertEqual(persisted.status, "pending")
         self.assertEqual(SeatAllocation.query.filter_by(seating_run_id=run.id).count(), 0)
+
+    def test_unverified_registration_cannot_be_seated(self):
+        self.registration.verification_status = "pending"
+        self.registration.verified_at = None
+        db.session.commit()
+        run = create_seating_run(self.exam_session.id, {"adjacency_rule": "orthogonal"})
+
+        with self.assertRaises(PersistenceError):
+            complete_seating_run(
+                run.id,
+                [{"student_id": self.student.id, "seat_id": self.seat.id}],
+                {"overall_valid": True},
+            )
+
+        self.assertEqual(SeatAllocation.query.filter_by(seating_run_id=run.id).count(), 0)
+
+    def test_verified_registration_rejects_overlapping_session(self):
+        overlapping = create_exam_session(
+            dataset=self.dataset,
+            exam_date=date(2026, 12, 1),
+            start_time=time(11, 0),
+            end_time=time(13, 0),
+            session_name="Overlapping Shift",
+            academic_year="2026-27",
+        )
+        other_subject = Subject(
+            code="PHY-101", name="Physics", source_type="real", dataset=self.dataset
+        )
+        db.session.add(other_subject)
+        db.session.flush()
+        paper = create_exam_paper(session=overlapping, subject=other_subject)
+
+        with self.assertRaises(AcademicValidationError):
+            register_student_for_paper(
+                student=self.student,
+                paper=paper,
+                verification_source="verified_exam_form",
+            )
+        db.session.rollback()
+
+    def test_non_overlapping_verified_registration_is_preserved(self):
+        later = create_exam_session(
+            dataset=self.dataset,
+            exam_date=date(2026, 12, 1),
+            start_time=time(12, 0),
+            end_time=time(14, 0),
+            session_name="Afternoon",
+            academic_year="2026-27",
+        )
+        other_subject = Subject(
+            code="CHEM-101", name="Chemistry", source_type="real", dataset=self.dataset
+        )
+        db.session.add(other_subject)
+        db.session.flush()
+        paper = create_exam_paper(session=later, subject=other_subject)
+        registration = register_student_for_paper(
+            student=self.student,
+            paper=paper,
+            verification_source="verified_exam_form",
+        )
+        db.session.commit()
+
+        self.assertEqual(registration.subject_id, other_subject.id)
+        self.assertEqual(registration.exam_session_id, later.id)
+        self.assertEqual(registration.verification_status, "verified")
 
 
 if __name__ == "__main__":

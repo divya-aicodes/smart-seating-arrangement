@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import joinedload
 
 from extensions import db
-from models import Exam, SeatAllocation, SeatingRun
+from models import Exam, ExamSession, SeatAllocation, SeatingRun
 from reporting import ReportNotAvailable, build_excel_report, build_pdf_report, load_report_data
 from security import record_audit
 
@@ -25,7 +25,10 @@ def dashboard():
     runs = db.session.scalars(
         select(SeatingRun)
         .where(SeatingRun.status.in_(["completed", "published"]))
-        .options(joinedload(SeatingRun.exam).joinedload(Exam.dataset))
+        .options(
+            joinedload(SeatingRun.exam).joinedload(Exam.dataset),
+            joinedload(SeatingRun.session).joinedload(ExamSession.dataset),
+        )
         .order_by(SeatingRun.generated_at.desc(), SeatingRun.id.desc())
         .limit(100)
     ).all()
@@ -51,7 +54,7 @@ def dashboard():
             select(func.count()).select_from(SeatingRun).where(SeatingRun.status == "published")
         ) or 0,
         "exams": db.session.scalar(
-            select(func.count(func.distinct(SeatingRun.exam_id))).where(reportable)
+            select(func.count(func.distinct(SeatingRun.exam_session_id))).where(reportable)
         ) or 0,
     }
     return render_template(

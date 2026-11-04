@@ -123,7 +123,7 @@ constraint rejection and a complete post-allocation validation pass.
 ```text
 1. Create or import a dataset
           |
-2. Create an exam, registrations, rooms, and seats
+2. Create an exam session, its subject papers, verified registrations, rooms, and seats
           |
 3. Select connected records or one-time CSV mode
           |
@@ -563,10 +563,10 @@ bench. Manual runs record an audit event but do not create a database
 
 A database-backed run requires:
 
-- an exam in `draft` or `scheduled` state;
-- eligible or registered active students;
+- an exam session in `draft` or `scheduled` state with at least one subject paper;
+- active students with verified `eligible` or `registered` paper registrations;
 - active rooms and seats; and
-- matching dataset ID and source type across the exam and selected rooms.
+- matching dataset ID and source type across the session and selected rooms.
 
 Successful allocations are committed transactionally. A persistence or hard
 constraint failure does not leave a partially completed allocation set.
@@ -636,8 +636,9 @@ disconnected static-data demonstration layer.
 | `Student` | Student identity, class, department, and accessibility requirement |
 | `StudentAcademicRecord` | Dated student-to-section history without duplicating student identity |
 | `Subject` | Subject code, title, and department |
-| `Exam` | Scheduled subject session linked to one dataset |
-| `ExamRegistration` | Student eligibility for an exam and subject |
+| `ExamSession` | Date, shift, time range, academic year, status, and dataset boundary |
+| `Exam` | One exact subject paper offered within an examination session; legacy scheduling fields remain as compatibility snapshots |
+| `ExamRegistration` | Verified student-to-paper eligibility, verification provenance, and session identity |
 | `Room` | Geometry, capacity, building, source type, and active state |
 | `Seat` | Materialized row, bench, seat number, accessibility, and active state |
 | `SeatingRun` | Solver configuration, lifecycle, validation result, and timestamps |
@@ -661,8 +662,9 @@ Institution
 Dataset
   |-- Students
   |-- Subjects
-  |-- Exams -- ExamRegistrations
-  |             +-- SeatingRuns -- SeatAllocations
+  |-- ExamSessions -- Exams (subject papers)
+  |          |         +-- ExamRegistrations
+  |          +-- SeatingRuns -- SeatAllocations
   |-- Rooms -- Seats -----------^
   |-- Invigilators -- InvigilatorAssignments
   +-- DataImports -- ImportStagingStudents
@@ -712,6 +714,10 @@ The API root is `/api/v1`.
 | `GET` | `/api/v1/datasets` | Paginated dataset list with source filtering |
 | `GET` | `/api/v1/datasets/<id>` | Dataset detail |
 | `POST` | `/api/v1/datasets/synthetic` | Generate a persisted synthetic dataset |
+| `GET`, `POST` | `/api/v1/exam-sessions` | List or create scheduled examination sessions |
+| `GET` | `/api/v1/exam-sessions/<id>` | Session detail with exact subject papers |
+| `POST` | `/api/v1/exam-sessions/<id>/papers` | Add a subject paper to a session |
+| `POST` | `/api/v1/exam-registrations/bulk` | Create verified exact-paper registrations with overlap checks |
 | `GET` | `/api/v1/exams` | Paginated exam list |
 | `GET` | `/api/v1/exams/<id>` | Exam detail |
 | `GET` | `/api/v1/rooms` | Paginated room list |
@@ -955,6 +961,9 @@ Additional documentation:
 - Accessibility backtracking can become expensive on adversarial large inputs.
 - The full production graph's chromatic polynomial is not calculated.
 - Manual runs are not persisted as reportable seating runs.
+- Registration verification currently records a trusted source supplied by the import
+  or administrative API. Curriculum, elective, backlog, and supplementary eligibility
+  entities still require a later reviewed academic-curriculum extension.
 - Large imports currently run synchronously in the upload request. Background workers,
   object storage, cancellation, and durable job progress belong to Phase 5.
 - The 100,000- and 500,000-row targets have not yet been benchmarked. The row cap must

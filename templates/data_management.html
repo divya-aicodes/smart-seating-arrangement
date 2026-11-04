@@ -193,11 +193,11 @@
 
     <div class="records-split">
         <div class="record-panel reveal">
-            <div class="record-panel-header"><div><h3>Exam sessions</h3><p>Scheduled records</p></div><span class="count-chip">{{ exams | length }} shown</span></div>
+            <div class="record-panel-header"><div><h3>Exam sessions</h3><p>Scheduled sessions and verified subject papers</p></div><span class="count-chip">{{ sessions | length }} shown</span></div>
             <div class="table-wrap">
                 <table class="data-table compact-table">
-                    <thead><tr><th>Date</th><th>Session</th><th>Source</th><th>Status</th></tr></thead>
-                    <tbody>{% for exam in exams %}<tr><td>{{ exam.exam_date }}</td><td><strong>{{ exam.session_name }}</strong><small>{{ exam.start_time }}–{{ exam.end_time }}</small></td><td>{{ exam.source_type | upper }}</td><td>{{ exam.status }}</td></tr>{% else %}<tr><td colspan="4"><div class="table-empty">No exam sessions yet.</div></td></tr>{% endfor %}</tbody>
+                    <thead><tr><th>Date</th><th>Session</th><th>Papers</th><th>Source</th><th>Status</th></tr></thead>
+                    <tbody>{% for session in sessions %}<tr><td>{{ session.exam_date }}</td><td><strong>{{ session.session_name }}</strong><small>{{ session.start_time }}–{{ session.end_time }}</small></td><td>{{ session.papers | length }}</td><td>{{ session.source_type | upper }}</td><td>{{ session.status }}</td></tr>{% else %}<tr><td colspan="5"><div class="table-empty">No exam sessions yet.</div></td></tr>{% endfor %}</tbody>
                 </table>
             </div>
         </div>

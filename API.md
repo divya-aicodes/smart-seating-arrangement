@@ -28,6 +28,10 @@ The API index is available at `/api/v1`, its machine-readable contract at
 | POST | `/datasets/synthetic` | public + CSRF | Generate deterministic synthetic records |
 | GET | `/imports/{id}` | public | Read staged-import status, counters, and progress |
 | GET | `/imports/{id}/errors` | public | Read paginated row-level validation errors |
+| GET | `/exam-sessions`, `/exam-sessions/{id}` | public | Read sessions and their exact subject papers |
+| POST | `/exam-sessions` | public + CSRF | Create a dated examination session |
+| POST | `/exam-sessions/{id}/papers` | public + CSRF | Add one existing subject as a paper in the session |
+| POST | `/exam-registrations/bulk` | public + CSRF | Verify exact student-paper registrations atomically |
 | GET | `/exams`, `/exams/{id}` | public | Read persisted exam data |
 | GET | `/rooms`, `/rooms/{id}` | public | Read persisted room and seat-capacity data |
 | GET | `/seating-runs`, `/seating-runs/{id}` | public | Read persisted optimizer runs |
@@ -37,6 +41,49 @@ The API index is available at `/api/v1`, its machine-readable contract at
 Because authentication has been removed, persisted student allocation data is available
 to anyone who can reach the deployment. Deploy only on a trusted network unless another
 access-control layer is placed in front of the application.
+
+## Sessions, papers, and registration conflicts
+
+An examination session defines when a shift occurs. An exam is one subject paper inside
+that session. The existing `/exams` response keeps its scheduling fields for backward
+compatibility and adds `exam_session_id`; the session is now the scheduling source of
+truth.
+
+Create a session:
+
+```json
+{
+  "dataset_id": 12,
+  "exam_date": "2026-12-02",
+  "start_time": "09:00",
+  "end_time": "12:00",
+  "session_name": "Morning",
+  "academic_year": "2026-27"
+}
+```
+
+Add a paper with `POST /api/v1/exam-sessions/{id}/papers`:
+
+```json
+{"subject_id": 41}
+```
+
+Verify registrations with `POST /api/v1/exam-registrations/bulk`:
+
+```json
+{
+  "verification_source": "controller_of_examinations",
+  "registrations": [
+    {"student_id": 501, "exam_id": 73},
+    {"student_id": 502, "exam_id": 74}
+  ]
+}
+```
+
+Every item names an exact paper; the API never infers a paper from department or
+specialisation. The complete batch is rolled back if a student is duplicated within a
+session, already has another paper in that session, references inactive or mismatched
+data, or has another verified registration whose time range overlaps on the same date.
 
 ## Import status
 

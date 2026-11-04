@@ -80,20 +80,44 @@ Set `IMPORT_CHUNK_SIZE` to a value from 100 through 20,000 to tune chunking for 
 measured deployment. The default is 5,000; change it only after representative import
 benchmarks.
 
+## Examination sessions and verified papers
+
+Migration `d3e5f7a9b024` separates scheduling from subject papers:
+
+- `exam_sessions` owns the date, start and end time, shift name, academic year, source,
+  dataset, and lifecycle status.
+- `exams` remains the backward-compatible paper resource and links one subject to one
+  session. Its legacy schedule columns are retained as compatibility snapshots.
+- `exam_registrations` links the student, exact paper, exact session, subject,
+  verification status, verification source, and verification time.
+- `seating_runs` are session-scoped so one plan can combine multiple verified papers in
+  the same shift.
+
+The migration creates one session for each legacy exam rather than guessing that
+separately created rows belonged to the same shift. Existing exact exam registrations
+are backfilled as verified with `legacy_exam_registration` provenance. Existing IDs and
+legacy exam API fields remain available.
+
+New registrations must name an exact paper. The service rejects a second paper for the
+same student in one session and rejects verified registrations whose time ranges overlap
+on the same date. Sessions that meet at a boundary, such as 09:00–12:00 and 12:00–14:00,
+do not overlap. Only active students with verified, eligible registrations can enter a
+persisted seating run.
+
 ## Data workflow
 
 1. Open `/data` after applying migrations.
 2. For institutional data, upload a UTF-8 CSV using the downloadable header-only
    template. Review the staged validation result, download any error report, and confirm
    the valid rows. Only confirmation creates a versioned real dataset, students,
-   subjects, an exam, and eligible exam registrations. No example students are inserted
-   automatically.
+   subjects, one session, exact subject papers, and verified eligible registrations. No
+   example students are inserted automatically.
 3. Create one or more physical rooms for that same dataset. Every seat is stored in the
    database with its row, bench, seat number, active status, and accessibility flag.
 4. Alternatively, generate an explicitly labelled synthetic dataset. The supplied seed
    deterministically creates students, subjects, registrations, rooms, seats, and
    invigilators, all connected to the same dataset version.
-5. Return to `/`, select the persisted exam and its rooms, and run the optimizer. A
+5. Return to `/`, select the persisted exam session and its rooms, and run the optimizer. A
    successful validated result is stored as a seating run with individual allocations.
 
 The server rejects rooms from a different dataset, so real and synthetic records cannot

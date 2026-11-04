@@ -64,7 +64,7 @@ from database_service import complete_seating_run, create_seating_run  # noqa: E
 from data_routes import data_bp  # noqa: E402
 from report_routes import report_bp  # noqa: E402
 from api_routes import api_bp  # noqa: E402
-from models import Exam, ExamRegistration, Room, Seat, Student  # noqa: E402
+from models import Exam, ExamRegistration, ExamSession, Room, Seat, Student  # noqa: E402
 from security import record_audit  # noqa: E402
 
 app.register_blueprint(data_bp)
@@ -520,10 +520,10 @@ def handle_csrf_error(error):
 @app.route("/", methods=["GET"])
 def index():
     """Render persisted exam and room choices plus an optional manual workflow."""
-    all_exams = db.session.scalars(
-        select(Exam)
-        .where(Exam.status.in_(["draft", "scheduled"]))
-        .order_by(Exam.exam_date, Exam.start_time)
+    all_sessions = db.session.scalars(
+        select(ExamSession)
+        .where(ExamSession.status.in_(["draft", "scheduled"]))
+        .order_by(ExamSession.exam_date, ExamSession.start_time)
     ).all()
     available_rooms = db.session.scalars(
         select(Room).where(Room.active.is_(True)).order_by(Room.building, Room.room_number)
@@ -531,12 +531,14 @@ def index():
     room_dataset_ids = {
         room.dataset_id for room in available_rooms if room.dataset_id is not None
     }
-    available_exams = [
-        exam for exam in all_exams if exam.dataset_id in room_dataset_ids
+    available_sessions = [
+        session
+        for session in all_sessions
+        if session.dataset_id in room_dataset_ids and session.papers
     ]
     return render_template(
         "index.html",
-        available_exams=available_exams,
+        available_sessions=available_sessions,
         available_rooms=available_rooms,
     )
 
@@ -631,7 +633,12 @@ def layout_recommendations():
 
 def load_database_assignment_inputs():
     try:
-        exam_id = int(request.form.get("exam_id", ""))
+        session_value = request.form.get("exam_session_id")
+        if session_value:
+            session = db.session.get(ExamSession, int(session_value))
+        else:
+            legacy_exam = db.session.get(Exam, int(request.form.get("exam_id", "")))
+            session = legacy_exam.session if legacy_exam is not None else None
     except ValueError as exc:
         raise ValueError("Select a persisted exam session.") from exc
     room_id_values = request.form.getlist("room_ids")
@@ -642,22 +649,22 @@ def load_database_assignment_inputs():
     if not room_ids:
         raise ValueError("Select at least one persisted room.")
 
-    exam = db.session.get(Exam, exam_id)
-    if exam is None or exam.status not in {"draft", "scheduled"}:
+    if session is None or session.status not in {"draft", "scheduled"}:
         raise ValueError("The selected exam session is unavailable.")
 
     registrations = db.session.scalars(
         select(ExamRegistration)
         .join(ExamRegistration.student)
         .where(
-            ExamRegistration.exam_id == exam.id,
+            ExamRegistration.exam_session_id == session.id,
             ExamRegistration.status.in_(["registered", "eligible"]),
+            ExamRegistration.verification_status == "verified",
             Student.active.is_(True),
         )
         .order_by(Student.student_code)
     ).all()
     if not registrations:
-        raise ValueError("The selected exam has no eligible registered students.")
+        raise ValueError("The selected session has no verified eligible registrations.")
 
     room_lookup = {
         room.id: room
@@ -667,12 +674,12 @@ def load_database_assignment_inputs():
     }
     if len(room_lookup) != len(room_ids):
         raise ValueError("One or more selected rooms are unavailable.")
-    if exam.dataset_id is None:
-        raise ValueError("The selected exam is not linked to a versioned dataset.")
+    if session.dataset_id is None:
+        raise ValueError("The selected exam session is not linked to a versioned dataset.")
     mismatched_rooms = [
         room.room_number
         for room in room_lookup.values()
-        if room.dataset_id != exam.dataset_id or room.source_type != exam.source_type
+        if room.dataset_id != session.dataset_id or room.source_type != session.source_type
     ]
     if mismatched_rooms:
         raise ValueError(
@@ -683,7 +690,7 @@ def load_database_assignment_inputs():
     database_student_ids = {}
     for registration in registrations:
         student = registration.student
-        subject = registration.subject or exam.subject
+        subject = registration.subject
         students.append({
             "id": student.student_code,
             "class": student.class_name,
@@ -729,7 +736,7 @@ def load_database_assignment_inputs():
             "unavailable_seats": unavailable_seats,
         })
 
-    return exam, students, room_configs, database_student_ids, database_seat_ids
+    return session, students, room_configs, database_student_ids, database_seat_ids
 
 
 @app.route("/assign", methods=["POST"])
@@ -758,12 +765,12 @@ def assign():
         diagonal = adjacency_rule == "diagonal"
         accessible_rule = "row_1_and_aisle"
 
-        persisted_exam = None
+        persisted_session = None
         database_student_ids = {}
         database_seat_ids = {}
         if data_mode == "database":
             (
-                persisted_exam,
+                persisted_session,
                 students,
                 room_configs,
                 database_student_ids,
@@ -883,9 +890,9 @@ def assign():
         counting_report = compute_combinatorial_counts(students, G_seats)
 
         seating_run_id = None
-        if persisted_exam is not None:
+        if persisted_session is not None:
             run = create_seating_run(
-                persisted_exam.id,
+                persisted_session.id,
                 {
                     "adjacency_rule": adjacency_rule,
                     "room_ids": [room["room_id"] for room in room_configs],
@@ -909,7 +916,8 @@ def assign():
                 "seating_run",
                 run.id,
                 after_values={
-                    "exam_id": persisted_exam.id,
+                    "exam_session_id": persisted_session.id,
+                    "exam_id": run.exam_id,
                     "allocation_count": len(persisted_allocations),
                 },
             )

@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import select
 
 from extensions import db
-from models import ExamRegistration, Seat, SeatAllocation, SeatingRun, Student
+from models import Exam, ExamRegistration, ExamSession, Seat, SeatAllocation, SeatingRun, Student
 
 
 class PersistenceError(RuntimeError):
@@ -14,14 +14,26 @@ class PersistenceError(RuntimeError):
 
 
 def create_seating_run(
-    exam_id: int,
+    exam_session_id: int,
     solver_config: dict[str, Any],
     *,
     solver_version: str = "greedy-v1",
     created_by: str | None = None,
 ) -> SeatingRun:
+    session = db.session.get(ExamSession, exam_session_id)
+    if session is None or session.status not in {"draft", "scheduled"}:
+        raise PersistenceError(f"Exam session {exam_session_id} is unavailable.")
+    primary_paper = db.session.scalar(
+        select(Exam)
+        .where(Exam.exam_session_id == session.id)
+        .order_by(Exam.id)
+        .limit(1)
+    )
+    if primary_paper is None:
+        raise PersistenceError(f"Exam session {exam_session_id} has no papers.")
     run = SeatingRun(
-        exam_id=exam_id,
+        exam_id=primary_paper.id,
+        exam_session_id=session.id,
         solver_version=solver_version,
         solver_config=solver_config,
         status="pending",
@@ -70,14 +82,16 @@ def complete_seating_run(
                 raise PersistenceError(f"Student {student_id} is unavailable.")
             registration = db.session.scalar(
                 select(ExamRegistration).where(
-                    ExamRegistration.exam_id == run.exam_id,
+                    ExamRegistration.exam_session_id == run.exam_session_id,
                     ExamRegistration.student_id == student_id,
                     ExamRegistration.status.in_(["registered", "eligible"]),
+                    ExamRegistration.verification_status == "verified",
                 )
             )
             if registration is None:
                 raise PersistenceError(
-                    f"Student {student_id} is not eligible for exam {run.exam_id}."
+                    f"Student {student_id} has no verified registration for exam "
+                    f"session {run.exam_session_id}."
                 )
             seat = db.session.get(Seat, seat_id)
             if seat is None or not seat.active:

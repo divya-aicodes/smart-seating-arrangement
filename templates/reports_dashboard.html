@@ -41,9 +41,9 @@
                     {% for run in runs %}
                     <tr>
                         <td><a class="run-link" href="{{ url_for('reports.run_detail', run_id=run.id) }}">#{{ run.id }} <span aria-hidden="true">→</span></a></td>
-                        <td><strong>{{ run.exam.exam_date }}</strong><small>{{ run.exam.session_name }}</small></td>
-                        <td>{{ run.exam.dataset.name if run.exam.dataset else 'Not linked' }}</td>
-                        <td><span class="badge badge-{{ 'synthetic' if run.exam.source_type == 'synthetic' else 'imported' }}">{{ run.exam.source_type | upper }}</span></td>
+                        <td><strong>{{ run.session.exam_date }}</strong><small>{{ run.session.session_name }}</small></td>
+                        <td>{{ run.session.dataset.name if run.session.dataset else 'Not linked' }}</td>
+                        <td><span class="badge badge-{{ 'synthetic' if run.session.source_type == 'synthetic' else 'imported' }}">{{ run.session.source_type | upper }}</span></td>
                         <td><span class="status-text status-{{ run.status }}">{{ run.status }}</span></td>
                         <td>{{ allocation_counts.get(run.id, 0) }}</td>
                         <td>{{ run.created_by or 'system' }}</td>

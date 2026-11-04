@@ -59,6 +59,7 @@ class Institution(TimestampMixin, db.Model):
     datasets: Mapped[list[Dataset]] = relationship(back_populates="institution")
     students: Mapped[list[Student]] = relationship(back_populates="institution")
     subjects: Mapped[list[Subject]] = relationship(back_populates="institution")
+    exam_sessions: Mapped[list[ExamSession]] = relationship(back_populates="institution")
     exams: Mapped[list[Exam]] = relationship(back_populates="institution")
     rooms: Mapped[list[Room]] = relationship(back_populates="institution")
     invigilators: Mapped[list[Invigilator]] = relationship(back_populates="institution")
@@ -230,6 +231,7 @@ class Dataset(TimestampMixin, db.Model):
     institution: Mapped[Institution | None] = relationship(back_populates="datasets")
     students: Mapped[list[Student]] = relationship(back_populates="dataset")
     subjects: Mapped[list[Subject]] = relationship(back_populates="dataset")
+    exam_sessions: Mapped[list[ExamSession]] = relationship(back_populates="dataset")
     exams: Mapped[list[Exam]] = relationship(back_populates="dataset")
     rooms: Mapped[list[Room]] = relationship(back_populates="dataset")
     invigilators: Mapped[list[Invigilator]] = relationship(back_populates="dataset")
@@ -329,6 +331,49 @@ class Subject(TimestampMixin, db.Model):
     registrations: Mapped[list[ExamRegistration]] = relationship(back_populates="subject")
 
 
+class ExamSession(TimestampMixin, db.Model):
+    __tablename__ = "exam_sessions"
+    __table_args__ = (
+        UniqueConstraint(
+            "dataset_id", "exam_date", "start_time", "end_time", "session_name",
+            name="uq_exam_sessions_dataset_schedule",
+        ),
+        CheckConstraint("end_time > start_time", name="ck_exam_sessions_time_order"),
+        CheckConstraint(
+            "status IN ('draft', 'scheduled', 'completed', 'cancelled')",
+            name="ck_exam_sessions_status",
+        ),
+        CheckConstraint(
+            "source_type IN ('real', 'synthetic')",
+            name="ck_exam_sessions_source_type",
+        ),
+        Index("ix_exam_sessions_date_time", "exam_date", "start_time", "end_time"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    institution_id: Mapped[int | None] = mapped_column(
+        ForeignKey("institutions.id", ondelete="RESTRICT"), index=True
+    )
+    dataset_id: Mapped[int | None] = mapped_column(
+        ForeignKey("datasets.id", ondelete="SET NULL"), index=True
+    )
+    exam_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    start_time: Mapped[time] = mapped_column(Time, nullable=False)
+    end_time: Mapped[time] = mapped_column(Time, nullable=False)
+    session_name: Mapped[str] = mapped_column(String(80), nullable=False)
+    academic_year: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
+    source_type: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="real", server_default="real"
+    )
+
+    institution: Mapped[Institution | None] = relationship(back_populates="exam_sessions")
+    dataset: Mapped[Dataset | None] = relationship(back_populates="exam_sessions")
+    papers: Mapped[list[Exam]] = relationship(back_populates="session")
+    registrations: Mapped[list[ExamRegistration]] = relationship(back_populates="session")
+    seating_runs: Mapped[list[SeatingRun]] = relationship(back_populates="session")
+
+
 class Exam(TimestampMixin, db.Model):
     __tablename__ = "exams"
     __table_args__ = (
@@ -339,6 +384,7 @@ class Exam(TimestampMixin, db.Model):
         CheckConstraint("end_time > start_time", name="ck_exams_time_order"),
         CheckConstraint("source_type IN ('real', 'synthetic')", name="ck_exams_source_type"),
         Index("ix_exams_date_session", "exam_date", "session_name"),
+        UniqueConstraint("exam_session_id", "subject_id", name="uq_exams_session_subject"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -348,6 +394,11 @@ class Exam(TimestampMixin, db.Model):
     subject_id: Mapped[int] = mapped_column(
         ForeignKey("subjects.id", ondelete="RESTRICT"), nullable=False, index=True
     )
+    exam_session_id: Mapped[int] = mapped_column(
+        ForeignKey("exam_sessions.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    # These schedule columns remain as compatibility snapshots for existing API clients.
+    # New scheduling rules use ExamSession as the source of truth.
     exam_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     start_time: Mapped[time] = mapped_column(Time, nullable=False)
     end_time: Mapped[time] = mapped_column(Time, nullable=False)
@@ -364,6 +415,7 @@ class Exam(TimestampMixin, db.Model):
     institution: Mapped[Institution | None] = relationship(back_populates="exams")
     dataset: Mapped[Dataset | None] = relationship(back_populates="exams")
     subject: Mapped[Subject] = relationship(back_populates="exams")
+    session: Mapped[ExamSession] = relationship(back_populates="papers")
     registrations: Mapped[list[ExamRegistration]] = relationship(back_populates="exam")
     seating_runs: Mapped[list[SeatingRun]] = relationship(back_populates="exam")
     invigilator_assignments: Mapped[list[InvigilatorAssignment]] = relationship(
@@ -375,11 +427,22 @@ class ExamRegistration(TimestampMixin, db.Model):
     __tablename__ = "exam_registrations"
     __table_args__ = (
         UniqueConstraint("exam_id", "student_id", name="uq_exam_registrations_exam_student"),
+        UniqueConstraint(
+            "exam_session_id", "student_id", name="uq_exam_registrations_session_student"
+        ),
         CheckConstraint(
             "status IN ('registered', 'eligible', 'ineligible', 'withdrawn')",
             name="ck_exam_registrations_status",
         ),
         Index("ix_exam_registrations_exam_status", "exam_id", "status"),
+        Index(
+            "ix_exam_registrations_session_verification",
+            "exam_session_id", "verification_status",
+        ),
+        CheckConstraint(
+            "verification_status IN ('pending', 'verified', 'rejected')",
+            name="ck_exam_registrations_verification_status",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -389,14 +452,23 @@ class ExamRegistration(TimestampMixin, db.Model):
     student_id: Mapped[int] = mapped_column(
         ForeignKey("students.id", ondelete="RESTRICT"), nullable=False
     )
-    subject_id: Mapped[int | None] = mapped_column(
-        ForeignKey("subjects.id", ondelete="RESTRICT"), index=True
+    exam_session_id: Mapped[int] = mapped_column(
+        ForeignKey("exam_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    subject_id: Mapped[int] = mapped_column(
+        ForeignKey("subjects.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="registered")
+    verification_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="pending"
+    )
+    verification_source: Mapped[str | None] = mapped_column(String(80))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     exam: Mapped[Exam] = relationship(back_populates="registrations")
+    session: Mapped[ExamSession] = relationship(back_populates="registrations")
     student: Mapped[Student] = relationship(back_populates="registrations")
-    subject: Mapped[Subject | None] = relationship(back_populates="registrations")
+    subject: Mapped[Subject] = relationship(back_populates="registrations")
 
 
 class Room(TimestampMixin, db.Model):
@@ -477,11 +549,15 @@ class SeatingRun(TimestampMixin, db.Model):
             name="ck_seating_runs_status",
         ),
         Index("ix_seating_runs_exam_status", "exam_id", "status"),
+        Index("ix_seating_runs_session_status", "exam_session_id", "status"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     exam_id: Mapped[int] = mapped_column(
         ForeignKey("exams.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    exam_session_id: Mapped[int] = mapped_column(
+        ForeignKey("exam_sessions.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     solver_version: Mapped[str] = mapped_column(String(50), nullable=False)
     solver_config: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
@@ -493,6 +569,7 @@ class SeatingRun(TimestampMixin, db.Model):
     failure_reason: Mapped[str | None] = mapped_column(Text)
 
     exam: Mapped[Exam] = relationship(back_populates="seating_runs")
+    session: Mapped[ExamSession] = relationship(back_populates="seating_runs")
     allocations: Mapped[list[SeatAllocation]] = relationship(
         back_populates="seating_run", cascade="all, delete-orphan"
     )
