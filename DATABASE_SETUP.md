@@ -80,6 +80,20 @@ Set `IMPORT_CHUNK_SIZE` to a value from 100 through 20,000 to tune chunking for 
 measured deployment. The default is 5,000; change it only after representative import
 benchmarks.
 
+## Phase 9 benchmark protocol
+
+Import stress tests must use a disposable PostgreSQL database and the opt-in harness in
+`benchmarks/import_benchmark.py`. The harness measures CSV generation separately from
+staging and commit, records throughput and Python peak allocated memory, and retains
+the resulting rows for count verification. It refuses SQLite and refuses to write
+unless `BENCHMARK_ALLOW_WRITES=1` is set.
+
+Optimization measurements use `benchmarks/optimization_benchmark.py` and remain
+separate because database ingestion throughput does not establish solver capacity.
+The 100,000- and 500,000-row import targets remain unverified until qualifying result
+artifacts are produced on PostgreSQL. Full commands and the claim gate are documented
+in `benchmarks/README.md`.
+
 ## Examination sessions and verified papers
 
 Migration `d3e5f7a9b024` separates scheduling from subject papers:

@@ -11,3 +11,4 @@ instance/
 *.sqlite3
 .coverage
 htmlcov/
+benchmark-results/

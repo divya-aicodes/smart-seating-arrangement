@@ -1027,6 +1027,26 @@ Additional documentation:
 - Durable production operation depends on PostgreSQL, migrations, backups,
   monitoring, and deployment-account controls.
 
+## Performance benchmarks
+
+Phase 9 adds opt-in, separate benchmark suites for the PostgreSQL CSV import pipeline
+and the seating optimizer. Results are written as machine-readable JSON under the
+ignored `benchmark-results/` directory. Ordinary CI does not run expensive stress
+targets.
+
+- `python -m benchmarks.import_benchmark --sizes 1000,10000` measures real PostgreSQL
+  staging through `COPY` and the operational commit path. It requires an explicitly
+  confirmed disposable database.
+- `python -m benchmarks.optimization_benchmark --sizes 100,500,1000` measures
+  feasibility, greedy allocation, bounded CP-SAT, and independent validation as
+  separate stages.
+- `python -m benchmarks.verify_claims benchmark-results/import-*.json` qualifies a
+  100K or 500K statement only from an exact, complete, zero-error PostgreSQL result.
+
+No 100K or 500K support claim is currently made. See
+[`benchmarks/README.md`](benchmarks/README.md) for safety requirements, metrics, and
+interpretation limits.
+
 ## License
 
 No open-source license file is currently included. Unless the repository owner
