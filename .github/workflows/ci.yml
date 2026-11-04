@@ -69,7 +69,7 @@ jobs:
       - name: Check migration drift
         run: python -m flask --app app db check
       - name: Run PostgreSQL integration checks
-        run: python tests/test_postgres_integration.py -v
+        run: python -m unittest discover -s tests -p "test_postgres_integration.py" -v
 
   container:
     runs-on: ubuntu-latest
