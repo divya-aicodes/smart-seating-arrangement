@@ -514,8 +514,9 @@ STU-002,Rohan Sen,CSE-B,Computer Science,CS301,Algorithms,Y
 STU-003,Meera Das,ECE-A,Electronics,EC204,Signals,N
 ```
 
-The import limit is 2 MiB. Student identifiers must be unique inside the
-dataset. Rows wider than the header, invalid UTF-8, missing required values, and
+The import limit is 2 MiB. Student identifiers currently remain globally unique
+to preserve backward compatibility until institution backfilling is complete.
+Rows wider than the header, invalid UTF-8, missing required values, and
 conflicting identifiers are rejected.
 
 ### Synthetic data
@@ -615,9 +616,16 @@ disconnected static-data demonstration layer.
 
 | Entity | Responsibility |
 | --- | --- |
+| `Institution` | Top-level ownership boundary for one college or institution |
+| `Department` | Institution-scoped academic department |
+| `Specialisation` | Department-owned programme specialisation |
+| `AcademicYear` | Institution-scoped dated academic year |
+| `Semester` | Dated semester within an academic year |
+| `Section` | Department and optional specialisation grouping for one semester |
 | `User` | Backend user and role record; the current public UI has no login or sign-up screen |
 | `Dataset` | Versioned real or synthetic source boundary |
 | `Student` | Student identity, class, department, and accessibility requirement |
+| `StudentAcademicRecord` | Dated student-to-section history without duplicating student identity |
 | `Subject` | Subject code, title, and department |
 | `Exam` | Scheduled subject session linked to one dataset |
 | `ExamRegistration` | Student eligibility for an exam and subject |
@@ -633,6 +641,12 @@ disconnected static-data demonstration layer.
 Important relationships:
 
 ```text
+Institution
+  |-- Departments -- Specialisations
+  |                  +-- Sections -- StudentAcademicRecords
+  |-- AcademicYears -- Semesters ---^
+  +-- Datasets
+
 Dataset
   |-- Students
   |-- Subjects
@@ -644,6 +658,11 @@ Dataset
 
 AuditLog records relevant actions across these resources.
 ```
+
+Institution links on existing operational entities are nullable during this additive
+migration stage. Existing records are not assigned to an institution automatically,
+because the repository has no verified institution identity or academic-placement data.
+The legacy class and department text fields remain available for backward compatibility.
 
 ## Web pages and routes
 

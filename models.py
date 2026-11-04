@@ -44,6 +44,137 @@ class TimestampMixin:
     )
 
 
+class Institution(TimestampMixin, db.Model):
+    __tablename__ = "institutions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(180), nullable=False)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="Asia/Kolkata")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+
+    users: Mapped[list[User]] = relationship(back_populates="institution")
+    departments: Mapped[list[Department]] = relationship(back_populates="institution")
+    academic_years: Mapped[list[AcademicYear]] = relationship(back_populates="institution")
+    datasets: Mapped[list[Dataset]] = relationship(back_populates="institution")
+    students: Mapped[list[Student]] = relationship(back_populates="institution")
+    subjects: Mapped[list[Subject]] = relationship(back_populates="institution")
+    exams: Mapped[list[Exam]] = relationship(back_populates="institution")
+    rooms: Mapped[list[Room]] = relationship(back_populates="institution")
+    invigilators: Mapped[list[Invigilator]] = relationship(back_populates="institution")
+    imports: Mapped[list[DataImport]] = relationship(back_populates="institution")
+
+
+class Department(TimestampMixin, db.Model):
+    __tablename__ = "departments"
+    __table_args__ = (
+        UniqueConstraint("institution_id", "code", name="uq_departments_institution_code"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    institution_id: Mapped[int] = mapped_column(
+        ForeignKey("institutions.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    code: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(String(150), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+
+    institution: Mapped[Institution] = relationship(back_populates="departments")
+    specialisations: Mapped[list[Specialisation]] = relationship(back_populates="department")
+    sections: Mapped[list[Section]] = relationship(back_populates="department")
+
+
+class Specialisation(TimestampMixin, db.Model):
+    __tablename__ = "specialisations"
+    __table_args__ = (
+        UniqueConstraint("department_id", "code", name="uq_specialisations_department_code"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    department_id: Mapped[int] = mapped_column(
+        ForeignKey("departments.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    code: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(String(150), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+
+    department: Mapped[Department] = relationship(back_populates="specialisations")
+    sections: Mapped[list[Section]] = relationship(back_populates="specialisation")
+
+
+class AcademicYear(TimestampMixin, db.Model):
+    __tablename__ = "academic_years"
+    __table_args__ = (
+        UniqueConstraint("institution_id", "label", name="uq_academic_years_institution_label"),
+        CheckConstraint("end_date >= start_date", name="ck_academic_years_date_order"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    institution_id: Mapped[int] = mapped_column(
+        ForeignKey("institutions.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    label: Mapped[str] = mapped_column(String(20), nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+
+    institution: Mapped[Institution] = relationship(back_populates="academic_years")
+    semesters: Mapped[list[Semester]] = relationship(back_populates="academic_year")
+
+
+class Semester(TimestampMixin, db.Model):
+    __tablename__ = "semesters"
+    __table_args__ = (
+        UniqueConstraint("academic_year_id", "number", name="uq_semesters_year_number"),
+        CheckConstraint("number > 0", name="ck_semesters_number_positive"),
+        CheckConstraint("end_date >= start_date", name="ck_semesters_date_order"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    academic_year_id: Mapped[int] = mapped_column(
+        ForeignKey("academic_years.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    number: Mapped[int] = mapped_column(Integer, nullable=False)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+
+    academic_year: Mapped[AcademicYear] = relationship(back_populates="semesters")
+    sections: Mapped[list[Section]] = relationship(back_populates="semester")
+
+
+class Section(TimestampMixin, db.Model):
+    __tablename__ = "sections"
+    __table_args__ = (
+        UniqueConstraint(
+            "semester_id", "department_id", "code",
+            name="uq_sections_academic_identity",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    semester_id: Mapped[int] = mapped_column(
+        ForeignKey("semesters.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    department_id: Mapped[int] = mapped_column(
+        ForeignKey("departments.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    specialisation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("specialisations.id", ondelete="RESTRICT"), index=True
+    )
+    code: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str | None] = mapped_column(String(120))
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+
+    semester: Mapped[Semester] = relationship(back_populates="sections")
+    department: Mapped[Department] = relationship(back_populates="sections")
+    specialisation: Mapped[Specialisation | None] = relationship(back_populates="sections")
+    academic_records: Mapped[list[StudentAcademicRecord]] = relationship(
+        back_populates="section"
+    )
+
+
 class User(UserMixin, TimestampMixin, db.Model):
     __tablename__ = "users"
     __table_args__ = (
@@ -52,6 +183,9 @@ class User(UserMixin, TimestampMixin, db.Model):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    institution_id: Mapped[int | None] = mapped_column(
+        ForeignKey("institutions.id", ondelete="RESTRICT"), index=True
+    )
     username: Mapped[str] = mapped_column(String(80), nullable=False, unique=True, index=True)
     email: Mapped[str | None] = mapped_column(String(255), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -60,6 +194,8 @@ class User(UserMixin, TimestampMixin, db.Model):
     failed_login_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    institution: Mapped[Institution | None] = relationship(back_populates="users")
 
     @property
     def is_active(self) -> bool:
@@ -81,6 +217,9 @@ class Dataset(TimestampMixin, db.Model):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    institution_id: Mapped[int | None] = mapped_column(
+        ForeignKey("institutions.id", ondelete="RESTRICT"), index=True
+    )
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     version: Mapped[str] = mapped_column(String(50), nullable=False, default="1")
     source_type: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -88,6 +227,7 @@ class Dataset(TimestampMixin, db.Model):
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft")
 
+    institution: Mapped[Institution | None] = relationship(back_populates="datasets")
     students: Mapped[list[Student]] = relationship(back_populates="dataset")
     subjects: Mapped[list[Subject]] = relationship(back_populates="dataset")
     exams: Mapped[list[Exam]] = relationship(back_populates="dataset")
@@ -104,6 +244,9 @@ class Student(TimestampMixin, db.Model):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    institution_id: Mapped[int | None] = mapped_column(
+        ForeignKey("institutions.id", ondelete="RESTRICT"), index=True
+    )
     student_code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     full_name: Mapped[str | None] = mapped_column(String(150))
     class_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
@@ -116,9 +259,47 @@ class Student(TimestampMixin, db.Model):
         ForeignKey("datasets.id", ondelete="SET NULL"), index=True
     )
 
+    institution: Mapped[Institution | None] = relationship(back_populates="students")
     dataset: Mapped[Dataset | None] = relationship(back_populates="students")
     registrations: Mapped[list[ExamRegistration]] = relationship(back_populates="student")
     allocations: Mapped[list[SeatAllocation]] = relationship(back_populates="student")
+    academic_records: Mapped[list[StudentAcademicRecord]] = relationship(
+        back_populates="student"
+    )
+
+
+class StudentAcademicRecord(TimestampMixin, db.Model):
+    __tablename__ = "student_academic_records"
+    __table_args__ = (
+        UniqueConstraint(
+            "student_id", "section_id", "valid_from",
+            name="uq_student_academic_records_period",
+        ),
+        CheckConstraint(
+            "valid_to IS NULL OR valid_to >= valid_from",
+            name="ck_student_academic_records_date_order",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'completed', 'withdrawn', 'transferred')",
+            name="ck_student_academic_records_status",
+        ),
+        Index("ix_student_academic_records_student_status", "student_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    student_id: Mapped[int] = mapped_column(
+        ForeignKey("students.id", ondelete="RESTRICT"), nullable=False
+    )
+    section_id: Mapped[int] = mapped_column(
+        ForeignKey("sections.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    registration_number: Mapped[str | None] = mapped_column(String(80), index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    valid_from: Mapped[date] = mapped_column(Date, nullable=False)
+    valid_to: Mapped[date | None] = mapped_column(Date)
+
+    student: Mapped[Student] = relationship(back_populates="academic_records")
+    section: Mapped[Section] = relationship(back_populates="academic_records")
 
 
 class Subject(TimestampMixin, db.Model):
@@ -128,6 +309,9 @@ class Subject(TimestampMixin, db.Model):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    institution_id: Mapped[int | None] = mapped_column(
+        ForeignKey("institutions.id", ondelete="RESTRICT"), index=True
+    )
     code: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     department: Mapped[str | None] = mapped_column(String(100), index=True)
@@ -139,6 +323,7 @@ class Subject(TimestampMixin, db.Model):
         ForeignKey("datasets.id", ondelete="SET NULL"), index=True
     )
 
+    institution: Mapped[Institution | None] = relationship(back_populates="subjects")
     dataset: Mapped[Dataset | None] = relationship(back_populates="subjects")
     exams: Mapped[list[Exam]] = relationship(back_populates="subject")
     registrations: Mapped[list[ExamRegistration]] = relationship(back_populates="subject")
@@ -157,6 +342,9 @@ class Exam(TimestampMixin, db.Model):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    institution_id: Mapped[int | None] = mapped_column(
+        ForeignKey("institutions.id", ondelete="RESTRICT"), index=True
+    )
     subject_id: Mapped[int] = mapped_column(
         ForeignKey("subjects.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -173,6 +361,7 @@ class Exam(TimestampMixin, db.Model):
         ForeignKey("datasets.id", ondelete="SET NULL"), index=True
     )
 
+    institution: Mapped[Institution | None] = relationship(back_populates="exams")
     dataset: Mapped[Dataset | None] = relationship(back_populates="exams")
     subject: Mapped[Subject] = relationship(back_populates="exams")
     registrations: Mapped[list[ExamRegistration]] = relationship(back_populates="exam")
@@ -226,6 +415,9 @@ class Room(TimestampMixin, db.Model):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    institution_id: Mapped[int | None] = mapped_column(
+        ForeignKey("institutions.id", ondelete="RESTRICT"), index=True
+    )
     room_number: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     building: Mapped[str] = mapped_column(String(100), nullable=False, default="Main")
     floor: Mapped[str | None] = mapped_column(String(50))
@@ -241,6 +433,7 @@ class Room(TimestampMixin, db.Model):
         ForeignKey("datasets.id", ondelete="SET NULL"), index=True
     )
 
+    institution: Mapped[Institution | None] = relationship(back_populates="rooms")
     dataset: Mapped[Dataset | None] = relationship(back_populates="rooms")
     seats: Mapped[list[Seat]] = relationship(back_populates="room")
     invigilator_assignments: Mapped[list[InvigilatorAssignment]] = relationship(
@@ -344,6 +537,9 @@ class Invigilator(TimestampMixin, db.Model):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    institution_id: Mapped[int | None] = mapped_column(
+        ForeignKey("institutions.id", ondelete="RESTRICT"), index=True
+    )
     employee_code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     full_name: Mapped[str] = mapped_column(String(150), nullable=False)
     department: Mapped[str | None] = mapped_column(String(100), index=True)
@@ -355,6 +551,7 @@ class Invigilator(TimestampMixin, db.Model):
         ForeignKey("datasets.id", ondelete="SET NULL"), index=True
     )
 
+    institution: Mapped[Institution | None] = relationship(back_populates="invigilators")
     dataset: Mapped[Dataset | None] = relationship(back_populates="invigilators")
     assignments: Mapped[list[InvigilatorAssignment]] = relationship(
         back_populates="invigilator"
@@ -404,6 +601,9 @@ class DataImport(TimestampMixin, db.Model):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    institution_id: Mapped[int | None] = mapped_column(
+        ForeignKey("institutions.id", ondelete="RESTRICT"), index=True
+    )
     dataset_id: Mapped[int | None] = mapped_column(
         ForeignKey("datasets.id", ondelete="SET NULL"), index=True
     )
@@ -415,6 +615,7 @@ class DataImport(TimestampMixin, db.Model):
     invalid_rows: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     error_report: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
+    institution: Mapped[Institution | None] = relationship(back_populates="imports")
     dataset: Mapped[Dataset | None] = relationship(back_populates="imports")
 
 

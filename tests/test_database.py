@@ -14,14 +14,21 @@ from database_service import (
 )
 from extensions import db
 from models import (
+    AcademicYear,
+    Department,
     Dataset,
     Exam,
     ExamRegistration,
+    Institution,
     Room,
     Seat,
     SeatAllocation,
+    Section,
+    Semester,
     SeatingRun,
+    Specialisation,
     Student,
+    StudentAcademicRecord,
     Subject,
 )
 
@@ -104,17 +111,24 @@ class TestDatabasePersistence(unittest.TestCase):
 
     def test_expected_persistent_tables_exist(self):
         expected = {
+            "academic_years",
             "audit_logs",
             "data_imports",
             "datasets",
+            "departments",
             "exam_registrations",
             "exams",
+            "institutions",
             "invigilator_assignments",
             "invigilators",
             "rooms",
             "seat_allocations",
             "seating_runs",
             "seats",
+            "sections",
+            "semesters",
+            "specialisations",
+            "student_academic_records",
             "students",
             "subjects",
             "users",
@@ -133,6 +147,75 @@ class TestDatabasePersistence(unittest.TestCase):
             source_type="real",
         )
         db.session.add(duplicate)
+        with self.assertRaises(IntegrityError):
+            db.session.commit()
+        db.session.rollback()
+
+    def test_normalized_academic_history_keeps_one_stable_student_identity(self):
+        institution = Institution(
+            code="COLLEGE-01",
+            name="SeatPlan Engineering College",
+            timezone="Asia/Kolkata",
+        )
+        department = Department(
+            institution=institution,
+            code="CSE",
+            name="Computer Science and Engineering",
+        )
+        specialisation = Specialisation(
+            department=department,
+            code="AI",
+            name="Artificial Intelligence",
+        )
+        academic_year = AcademicYear(
+            institution=institution,
+            label="2026-27",
+            start_date=date(2026, 7, 1),
+            end_date=date(2027, 6, 30),
+        )
+        semester = Semester(
+            academic_year=academic_year,
+            number=5,
+            name="Semester 5",
+            start_date=date(2026, 7, 1),
+            end_date=date(2026, 12, 31),
+        )
+        section = Section(
+            semester=semester,
+            department=department,
+            specialisation=specialisation,
+            code="A",
+            name="CSE AI Section A",
+        )
+        record = StudentAcademicRecord(
+            student=self.student,
+            section=section,
+            registration_number="REG-2026-001",
+            status="active",
+            valid_from=date(2026, 7, 1),
+        )
+        self.student.institution = institution
+        db.session.add(record)
+        db.session.commit()
+
+        saved = db.session.get(Student, self.student.id)
+        self.assertEqual(saved.institution.code, "COLLEGE-01")
+        self.assertEqual(saved.academic_records[0].section.department.code, "CSE")
+        self.assertEqual(saved.academic_records[0].section.specialisation.code, "AI")
+        self.assertEqual(saved.student_code, "STU-001")
+
+    def test_department_code_is_unique_within_institution_only(self):
+        first = Institution(code="INST-A", name="Institution A")
+        second = Institution(code="INST-B", name="Institution B")
+        db.session.add_all([
+            Department(institution=first, code="CSE", name="Computer Science"),
+            Department(institution=second, code="CSE", name="Computer Science"),
+        ])
+        db.session.commit()
+
+        db.session.add(
+            Department(institution=first, code="CSE", name="Duplicate Computer Science")
+        )
         with self.assertRaises(IntegrityError):
             db.session.commit()
         db.session.rollback()

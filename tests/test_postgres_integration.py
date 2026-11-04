@@ -37,6 +37,10 @@ class TestPostgresIntegration(unittest.TestCase):
         tables = set(inspect(self.db.engine).get_table_names())
         self.assertTrue({
             "alembic_version",
+            "institutions",
+            "departments",
+            "academic_years",
+            "student_academic_records",
             "datasets",
             "students",
             "exam_registrations",
@@ -46,7 +50,7 @@ class TestPostgresIntegration(unittest.TestCase):
         version = self.db.session.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-        self.assertEqual(version, "08f8080be851")
+        self.assertEqual(version, "b6f0a9e2c741")
 
     def test_postgresql_transaction_rollback_preserves_database_state(self):
         from models import Dataset

@@ -46,6 +46,15 @@ Real and synthetic records use the same normalized tables. A dataset records its
 `source_type`, version, and optional generation seed. Synthetic data must always be
 stored with `source_type = synthetic`; it is never presented as institutional data.
 
+## Institution and academic foundation
+
+Migration `b6f0a9e2c741` adds institutions, departments, specialisations, academic
+years, semesters, sections, and dated student academic records. It also adds nullable
+institution foreign keys to existing operational entities. The migration does not
+invent an institution, infer a student's section, or rewrite existing rows. A later,
+reviewed backfill must establish verified ownership before those links can become
+mandatory or replace legacy text fields.
+
 ## Phase 3 data workflow
 
 1. Open `/data` after applying migrations.
