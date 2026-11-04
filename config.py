@@ -221,6 +221,7 @@ def load_app_config(environ: Mapping[str, str] | None = None) -> dict[str, objec
         "SESSION_COOKIE_HTTPONLY": True,
         "SESSION_COOKIE_SAMESITE": session_cookie_samesite,
         "SESSION_COOKIE_SECURE": session_cookie_secure,
+        "SESSION_COOKIE_DOMAIN": None,
         "PERMANENT_SESSION_LIFETIME": timedelta(hours=8),
         "WTF_CSRF_ENABLED": True,
         "WTF_CSRF_TIME_LIMIT": 7200,
@@ -235,6 +236,14 @@ def load_app_config(environ: Mapping[str, str] | None = None) -> dict[str, objec
         "TRUST_PROXY_HEADERS": _env_flag(
             "TRUST_PROXY_HEADERS", False, environ=values
         ),
+        "INITIAL_SETUP_TOKEN": values.get("INITIAL_SETUP_TOKEN", "").strip(),
+        "RATELIMIT_STORAGE_URI": values.get(
+            "RATE_LIMIT_STORAGE_URI", redis_url or "memory://"
+        ).strip(),
+        "RATELIMIT_DEFAULT": values.get(
+            "RATE_LIMIT_DEFAULT", "300 per minute"
+        ).strip(),
+        "RATELIMIT_HEADERS_ENABLED": True,
         "LOG_LEVEL": log_level,
     }
 

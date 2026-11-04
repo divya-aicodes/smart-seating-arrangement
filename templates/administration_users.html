@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Users and roles | SeatPlan{% endblock %}
+{% block content %}
+<section class="page-hero page-shell compact-hero">
+    <div><p class="eyebrow">Access control</p><h1>Institution users</h1><p class="hero-lead">Create role-scoped accounts. Passwords are hashed and are never displayed again.</p></div>
+</section>
+<section class="page-shell records-split">
+    <div class="record-panel">
+        <div class="record-panel-header"><div><h3>Create account</h3><p>Admin, planner, or read-only viewer</p></div></div>
+        <form method="post" class="stacked-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label>Username<input name="username" required maxlength="80" autocomplete="off"></label>
+            <label>Email <span class="optional">optional</span><input type="email" name="email" maxlength="255" autocomplete="off"></label>
+            <label>Role<select name="role"><option value="viewer">Viewer</option><option value="planner">Planner</option><option value="admin">Administrator</option></select></label>
+            <label>Temporary password<input type="password" name="password" required minlength="12" autocomplete="new-password"><small>At least 12 characters with uppercase, lowercase, and a number.</small></label>
+            <button class="button button-primary" type="submit">Create account</button>
+        </form>
+    </div>
+    <div class="record-panel">
+        <div class="record-panel-header"><div><h3>Current accounts</h3><p>Only users assigned to this institution</p></div></div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Last sign-in</th></tr></thead><tbody>
+        {% for user in users.items %}<tr><td>{{ user.username }}</td><td>{{ user.email or '—' }}</td><td>{{ user.role }}</td><td>{{ 'Active' if user.active else 'Inactive' }}</td><td>{{ user.last_login_at or 'Never' }}</td></tr>{% else %}<tr><td colspan="5"><div class="table-empty">No accounts found.</div></td></tr>{% endfor %}
+        </tbody></table></div>{{ navigation | safe }}
+    </div>
+</section>
+{% endblock %}

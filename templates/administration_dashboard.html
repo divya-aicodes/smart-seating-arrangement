@@ -12,6 +12,7 @@
     <article class="metric-card reveal"><span class="metric-index">04</span><strong>{{ stats.rooms }}</strong><p>Rooms</p></article>
 </section>
 <section class="page-shell admin-link-grid" aria-label="Administration sections">
+    <a class="admin-link-card reveal" href="{{ url_for('administration.users') }}"><span>Access control</span><strong>Users and roles</strong><small>Provision institution accounts →</small></a>
     <a class="admin-link-card reveal" href="{{ url_for('administration.academics') }}"><span>Academic structure</span><strong>Departments, sections and subjects</strong><small>Inspect normalized academic records →</small></a>
     <a class="admin-link-card reveal" href="{{ url_for('administration.examinations') }}"><span>Examinations</span><strong>Sessions, papers and registrations</strong><small>Review verified examination scope →</small></a>
     <a class="admin-link-card reveal" href="{{ url_for('administration.rooms') }}"><span>Physical inventory</span><strong>Rooms, capacity and accessibility</strong><small>Inspect active seat records →</small></a>

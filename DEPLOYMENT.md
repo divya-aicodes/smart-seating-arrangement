@@ -10,14 +10,19 @@ introduced by deployment.
 - PostgreSQL with persistent, encrypted storage and automated backups
 - HTTPS terminated by a trusted load balancer or reverse proxy
 - A unique `SECRET_KEY` of at least 32 characters stored in the platform secret manager
+- A one-time random `INITIAL_SETUP_TOKEN` until the first administrator is created
 - Exact public hostnames in `ALLOWED_HOSTS`
 - Database migrations executed once before new application replicas receive traffic
 - Redis and at least one Celery worker when `BACKGROUND_JOBS_ENABLED=true`
 - Shared private storage or S3-compatible storage visible to both web and worker
-- A trusted network or external access-control gateway if records are not public
+- Shared Redis rate-limit storage when multiple web replicas are used
 
 Production mode fails closed when the secret is missing or placeholder-valued, the
 database is not PostgreSQL, or secure session cookies are disabled.
+
+After the migration, visit `/setup` once, provide `INITIAL_SETUP_TOKEN`, create the
+institution administrator, and then remove or rotate the setup token. The route returns
+404 after any user exists. Do not create a default password in an image or migration.
 
 ## Container image
 

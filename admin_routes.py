@@ -1,9 +1,12 @@
 """Read-only institutional administration registers backed by persisted data."""
 
-from flask import Blueprint, render_template
+from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask_login import current_user
 from sqlalchemy import func, select
 from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.exc import IntegrityError
 
+from auth_routes import password_validation_error
 from extensions import db
 from models import (
     AcademicYear,
@@ -22,6 +25,7 @@ from models import (
     Specialisation,
     Student,
     Subject,
+    User,
 )
 from pagination import page_navigation, paginate
 
@@ -30,10 +34,29 @@ admin_bp = Blueprint("administration", __name__, url_prefix="/administration")
 
 
 def _counts(*models):
-    return {
-        model.__tablename__: db.session.scalar(select(func.count()).select_from(model)) or 0
-        for model in models
-    }
+    counts = {}
+    for model in models:
+        statement = select(func.count()).select_from(model)
+        if model is Institution:
+            statement = statement.where(Institution.id == current_user.institution_id)
+        elif model is Specialisation:
+            statement = statement.join(Department).where(
+                Department.institution_id == current_user.institution_id
+            )
+        elif model is Section:
+            statement = statement.join(Department).where(
+                Department.institution_id == current_user.institution_id
+            )
+        elif model is ExamRegistration:
+            statement = statement.join(ExamSession).where(
+                ExamSession.institution_id == current_user.institution_id
+            )
+        elif model is Seat:
+            statement = statement.join(Room).where(
+                Room.institution_id == current_user.institution_id
+            )
+        counts[model.__tablename__] = db.session.scalar(statement) or 0
+    return counts
 
 
 @admin_bp.get("")
@@ -62,6 +85,8 @@ def academics():
     )
     sections = paginate(
         select(Section)
+        .join(Section.department)
+        .where(Department.institution_id == current_user.institution_id)
         .options(
             joinedload(Section.department),
             joinedload(Section.specialisation),
@@ -173,4 +198,57 @@ def audit():
         "administration_audit.html",
         audits=audit_page,
         navigation=page_navigation(audit_page),
+    )
+
+
+@admin_bp.route("/users", methods=["GET", "POST"])
+def users():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        email = request.form.get("email", "").strip() or None
+        role = request.form.get("role", "viewer").strip()
+        password = request.form.get("password", "")
+        error = password_validation_error(password)
+        if not username or len(username) > 80:
+            error = "Username is required and must be 80 characters or fewer."
+        elif role not in {"admin", "planner", "viewer"}:
+            error = "Select a valid account role."
+        if error:
+            flash(error, "error")
+            return redirect(url_for("administration.users"))
+        account = User(
+            institution_id=current_user.institution_id,
+            username=username,
+            email=email,
+            role=role,
+            active=True,
+        )
+        account.set_password(password)
+        try:
+            db.session.add(account)
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            flash("That username or email is already registered.", "error")
+        else:
+            from security import record_audit
+
+            record_audit(
+                "user_created",
+                "user",
+                account.id,
+                after_values={"username": account.username, "role": account.role},
+            )
+            flash(f"Created {role} account '{username}'.", "success")
+        return redirect(url_for("administration.users"))
+    account_page = paginate(
+        select(User)
+        .where(User.institution_id == current_user.institution_id)
+        .order_by(User.active.desc(), User.username),
+        per_page=30,
+    )
+    return render_template(
+        "administration_users.html",
+        users=account_page,
+        navigation=page_navigation(account_page),
     )

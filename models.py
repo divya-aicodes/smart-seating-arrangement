@@ -212,7 +212,9 @@ class User(UserMixin, TimestampMixin, db.Model):
 class Dataset(TimestampMixin, db.Model):
     __tablename__ = "datasets"
     __table_args__ = (
-        UniqueConstraint("name", "version", name="uq_datasets_name_version"),
+        UniqueConstraint(
+            "institution_id", "name", "version", name="uq_datasets_institution_name_version"
+        ),
         CheckConstraint("source_type IN ('real', 'synthetic')", name="ck_datasets_source_type"),
         CheckConstraint("status IN ('draft', 'active', 'archived')", name="ck_datasets_status"),
     )
@@ -243,13 +245,16 @@ class Student(TimestampMixin, db.Model):
     __table_args__ = (
         CheckConstraint("source_type IN ('real', 'synthetic')", name="ck_students_source_type"),
         Index("ix_students_class_department", "class_name", "department"),
+        UniqueConstraint(
+            "institution_id", "student_code", name="uq_students_institution_code"
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     institution_id: Mapped[int | None] = mapped_column(
         ForeignKey("institutions.id", ondelete="RESTRICT"), index=True
     )
-    student_code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    student_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     full_name: Mapped[str | None] = mapped_column(String(150))
     class_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     department: Mapped[str | None] = mapped_column(String(100), index=True)
@@ -308,13 +313,14 @@ class Subject(TimestampMixin, db.Model):
     __tablename__ = "subjects"
     __table_args__ = (
         CheckConstraint("source_type IN ('real', 'synthetic')", name="ck_subjects_source_type"),
+        UniqueConstraint("institution_id", "code", name="uq_subjects_institution_code"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     institution_id: Mapped[int | None] = mapped_column(
         ForeignKey("institutions.id", ondelete="RESTRICT"), index=True
     )
-    code: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
+    code: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     department: Mapped[str | None] = mapped_column(String(100), index=True)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -474,7 +480,10 @@ class ExamRegistration(TimestampMixin, db.Model):
 class Room(TimestampMixin, db.Model):
     __tablename__ = "rooms"
     __table_args__ = (
-        UniqueConstraint("building", "room_number", name="uq_rooms_building_number"),
+        UniqueConstraint(
+            "institution_id", "building", "room_number",
+            name="uq_rooms_institution_building_number",
+        ),
         CheckConstraint("rows > 0", name="ck_rooms_rows_positive"),
         CheckConstraint("benches_per_row > 0", name="ck_rooms_benches_positive"),
         CheckConstraint("seats_per_bench > 0", name="ck_rooms_seats_positive"),
@@ -520,6 +529,7 @@ class Seat(TimestampMixin, db.Model):
             "room_id", "row_number", "bench_number", "seat_number",
             name="uq_seats_room_position",
         ),
+        UniqueConstraint("room_id", "seat_code", name="uq_seats_room_code"),
         CheckConstraint("row_number > 0", name="ck_seats_row_positive"),
         CheckConstraint("bench_number > 0", name="ck_seats_bench_positive"),
         CheckConstraint("seat_number > 0", name="ck_seats_number_positive"),
@@ -530,7 +540,7 @@ class Seat(TimestampMixin, db.Model):
     room_id: Mapped[int] = mapped_column(
         ForeignKey("rooms.id", ondelete="RESTRICT"), nullable=False
     )
-    seat_code: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
+    seat_code: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     row_number: Mapped[int] = mapped_column(Integer, nullable=False)
     bench_number: Mapped[int] = mapped_column(Integer, nullable=False)
     seat_number: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -558,6 +568,9 @@ class SeatingRun(TimestampMixin, db.Model):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    institution_id: Mapped[int | None] = mapped_column(
+        ForeignKey("institutions.id", ondelete="RESTRICT"), index=True
+    )
     exam_id: Mapped[int] = mapped_column(
         ForeignKey("exams.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -617,13 +630,16 @@ class Invigilator(TimestampMixin, db.Model):
         CheckConstraint(
             "source_type IN ('real', 'synthetic')", name="ck_invigilators_source_type"
         ),
+        UniqueConstraint(
+            "institution_id", "employee_code", name="uq_invigilators_institution_code"
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     institution_id: Mapped[int | None] = mapped_column(
         ForeignKey("institutions.id", ondelete="RESTRICT"), index=True
     )
-    employee_code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    employee_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     full_name: Mapped[str] = mapped_column(String(150), nullable=False)
     department: Mapped[str | None] = mapped_column(String(100), index=True)
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -742,6 +758,9 @@ class BackgroundJob(TimestampMixin, db.Model):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    institution_id: Mapped[int | None] = mapped_column(
+        ForeignKey("institutions.id", ondelete="RESTRICT"), index=True
+    )
     task_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True, index=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
     job_type: Mapped[str] = mapped_column(String(40), nullable=False)
@@ -817,12 +836,20 @@ class AuditLog(db.Model):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    institution_id: Mapped[int | None] = mapped_column(
+        ForeignKey("institutions.id", ondelete="RESTRICT"), index=True
+    )
+    actor_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
     actor: Mapped[str | None] = mapped_column(String(150))
     action: Mapped[str] = mapped_column(String(80), nullable=False)
     entity_type: Mapped[str] = mapped_column(String(80), nullable=False)
     entity_id: Mapped[str] = mapped_column(String(100), nullable=False)
     before_values: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     after_values: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    request_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    ip_address: Mapped[str | None] = mapped_column(String(45))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, nullable=False
     )

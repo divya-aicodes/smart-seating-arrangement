@@ -3,6 +3,7 @@
 import hashlib
 
 from flask import Blueprint, abort, current_app, redirect, render_template, request, send_file, url_for
+from flask_login import current_user
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import joinedload
 
@@ -43,7 +44,7 @@ def _queue_large_report(run_id, report_format):
         "report_generation",
         {"run_id": run_id, "format": report_format, "progress_total": 100},
         idempotency_key=hashlib.sha256(key_source.encode("utf-8")).hexdigest(),
-        created_by="local-user",
+        created_by=current_user.username,
     )
     if not reused:
         try:

@@ -14,6 +14,8 @@ from collections import Counter
 from urllib.parse import urlsplit
 # pyrefly: ignore [missing-import]
 from flask import Flask, render_template, request, redirect, url_for, flash, Response, abort, jsonify, g
+from flask_login import current_user
+from sqlalchemy import func
 from flask_wtf.csrf import CSRFError
 from sqlalchemy import select
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -28,7 +30,7 @@ from config import (
     configure_logging,
     load_app_config,
 )
-from extensions import csrf, db, migrate
+from extensions import csrf, db, limiter, login_manager, migrate
 
 from seating.feasibility_check import build_seat_adjacency_graph, check_feasibility
 from seating.forbidden_positions import assign_special_needs_students
@@ -64,6 +66,10 @@ if database_url.startswith("sqlite"):
     os.makedirs(app.instance_path, exist_ok=True)
 db.init_app(app)
 migrate.init_app(app, db)
+login_manager.init_app(app)
+limiter.init_app(app)
+login_manager.login_view = "auth.login"
+login_manager.login_message = "Sign in to continue."
 
 # Importing models registers all tables with SQLAlchemy and Flask-Migrate.
 import models as _models  # noqa: E402,F401
@@ -73,8 +79,9 @@ from report_routes import report_bp  # noqa: E402
 from api_routes import api_bp  # noqa: E402
 from job_routes import job_api_bp, job_bp  # noqa: E402
 from admin_routes import admin_bp  # noqa: E402
-from models import Exam, ExamRegistration, ExamSession, Room, Seat, Student  # noqa: E402
-from security import record_audit  # noqa: E402
+from models import Exam, ExamRegistration, ExamSession, Room, Seat, Student, User  # noqa: E402
+from security import record_audit, security_error  # noqa: E402
+from auth_routes import auth_bp  # noqa: E402
 from solver_status import solver_status_info  # noqa: E402
 
 app.register_blueprint(data_bp)
@@ -83,6 +90,27 @@ app.register_blueprint(api_bp)
 app.register_blueprint(job_bp)
 app.register_blueprint(job_api_bp)
 app.register_blueprint(admin_bp)
+app.register_blueprint(auth_bp)
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    try:
+        return db.session.get(User, int(user_id))
+    except (TypeError, ValueError):
+        return None
+
+
+@login_manager.unauthorized_handler
+def authentication_required():
+    if request.path.startswith("/api/"):
+        return jsonify({
+            "error": {
+                "code": "authentication_required",
+                "message": "Authentication is required.",
+            }
+        }), 401
+    return redirect(url_for("auth.login", next=request.full_path.rstrip("?")))
 
 
 @app.context_processor
@@ -115,6 +143,53 @@ def assign_request_id():
         g.request_id = supplied
     else:
         g.request_id = secrets.token_hex(16)
+
+
+@app.before_request
+def enforce_authentication_and_roles():
+    """Protect records centrally while keeping health and API contracts public."""
+    public_endpoints = {
+        "static",
+        "auth.login",
+        "auth.setup",
+        "api.api_index",
+        "api.health",
+        "api.openapi_document",
+    }
+    if request.endpoint in public_endpoints:
+        return None
+    user_count = db.session.scalar(
+        select(func.count(User.id)).execution_options(include_all_tenants=True)
+    ) or 0
+    if user_count == 0:
+        if request.path.startswith("/api/"):
+            return jsonify({
+                "error": {
+                    "code": "initial_setup_required",
+                    "message": "Create the first institution administrator before using this API.",
+                }
+            }), 503
+        return redirect(url_for("auth.setup"))
+    if not current_user.is_authenticated:
+        return authentication_required()
+    if current_user.institution_id is None:
+        return security_error(
+            "institution_required",
+            "This account is not assigned to an institution.",
+            403,
+        )
+    g.institution_id = current_user.institution_id
+    if request.endpoint == "auth.logout":
+        return None
+    if request.blueprint == "administration" and current_user.role != "admin":
+        return security_error("forbidden", "Administrator access is required.", 403)
+    if request.endpoint == "api.publish_run" and current_user.role != "admin":
+        return security_error("forbidden", "Only administrators can publish seating runs.", 403)
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and current_user.role not in {
+        "admin", "planner"
+    }:
+        return security_error("forbidden", "Planner access is required.", 403)
+    return None
 
 
 @app.before_request
@@ -529,6 +604,20 @@ def handle_forbidden_request(error):
     )
 
 
+@app.errorhandler(429)
+def handle_rate_limit(error):
+    if request.path.startswith("/api/"):
+        return jsonify({"error": {
+            "code": "rate_limit_exceeded",
+            "message": "Too many requests. Wait before trying again.",
+        }}), 429
+    return render_assignment_error(
+        "Request Limit Reached",
+        "Too many requests were received. Wait before trying again.",
+        429,
+    )
+
+
 @app.errorhandler(CSRFError)
 def handle_csrf_error(error):
     if request.path.startswith("/api/"):
@@ -822,7 +911,7 @@ def assign():
                 job, _ = create_job(
                     "seating_optimization",
                     {"form": queued_form, "progress_total": 100},
-                    created_by="local-user",
+                    created_by=current_user.username,
                 )
                 try:
                     enqueue_job(job)
@@ -996,7 +1085,7 @@ def assign():
                 created_by=(
                     f"background-job:{request.form.get('_background_job_id')}"
                     if request.form.get("_background_job_id")
-                    else "local-user"
+                    else current_user.username
                 ),
             )
             relaxed_student_ids = {

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Initial setup | SeatPlan{% endblock %}
+{% block content %}
+<section class="auth-shell">
+    <div class="auth-card auth-card-wide">
+        <p class="eyebrow">One-time initialization</p>
+        <h1>Create the first institution administrator</h1>
+        <p>This page closes permanently after the first account is created.</p>
+        <form method="post" class="stacked-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            {% if token_required %}<label>Setup token<input type="password" name="setup_token" required autocomplete="off"></label>{% endif %}
+            <div class="form-grid two-columns">
+                <label>Institution name<input name="institution_name" required maxlength="180"></label>
+                <label>Institution code<input name="institution_code" required maxlength="50"></label>
+                <label>Administrator username<input name="username" required maxlength="80" autocomplete="username"></label>
+                <label>Email <span class="optional">optional</span><input type="email" name="email" maxlength="255" autocomplete="email"></label>
+            </div>
+            <label>Password<input type="password" name="password" required minlength="12" autocomplete="new-password"><small>At least 12 characters with uppercase, lowercase, and a number.</small></label>
+            <label class="checkbox-row"><input type="checkbox" name="claim_unscoped" value="yes"> Assign existing unscoped records to this institution</label>
+            <button class="button button-primary" type="submit">Create administrator</button>
+        </form>
+    </div>
+</section>
+{% endblock %}

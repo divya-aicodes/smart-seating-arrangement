@@ -15,6 +15,7 @@ from uuid import uuid4
 from openpyxl import load_workbook
 from pypdf import PdfReader
 from werkzeug.datastructures import FileStorage
+from flask import g
 
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
@@ -34,9 +35,11 @@ from models import (
     ExamSession,
     ImportRowError,
     ImportStagingStudent,
+    Institution,
     Room,
     SeatingRun,
     Student,
+    User,
 )
 
 
@@ -50,7 +53,21 @@ class TestFlaskIntegration(unittest.TestCase):
         self.context.push()
         db.drop_all()
         db.create_all()
+        institution = Institution(code="TEST", name="Test Institution")
+        user = User(
+            institution=institution,
+            username="admin",
+            role="admin",
+            active=True,
+        )
+        user.set_password("TestingPass123")
+        db.session.add_all([institution, user])
+        db.session.commit()
+        g.institution_id = institution.id
         self.client = self.app.test_client()
+        with self.client.session_transaction() as session:
+            session["_user_id"] = str(user.id)
+            session["_fresh"] = True
 
     def tearDown(self):
         db.session.remove()
@@ -1029,6 +1046,25 @@ class TestPublicAccessSecurity(unittest.TestCase):
         db.create_all()
         self.client = self.app.test_client()
 
+    def create_admin_and_login(self, role="admin"):
+        institution = Institution(code="SEC", name="Security Test Institution")
+        user = User(
+            institution=institution,
+            username=f"{role}-user",
+            role=role,
+            active=True,
+        )
+        user.set_password("TestingPass123")
+        db.session.add_all([institution, user])
+        db.session.commit()
+        g.institution_id = institution.id
+        with self.client.session_transaction() as session:
+            session["_user_id"] = str(user.id)
+            session["_fresh"] = True
+        if hasattr(g, "_login_user"):
+            del g._login_user
+        return user
+
     def tearDown(self):
         db.session.remove()
         db.drop_all()
@@ -1041,13 +1077,19 @@ class TestPublicAccessSecurity(unittest.TestCase):
         self.assertIsNotNone(match)
         return match.group(1).decode("utf-8")
 
-    def test_project_pages_open_without_login(self):
+    def test_initial_setup_then_project_pages_require_login(self):
+        self.assertEqual(self.client.get("/").status_code, 302)
+        self.assertIn("/setup", self.client.get("/").headers["Location"])
+        self.assertEqual(self.client.get("/setup").status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/datasets").status_code, 503)
+        self.create_admin_and_login()
         self.assertEqual(self.client.get("/").status_code, 200)
         self.assertEqual(self.client.get("/data").status_code, 200)
         self.assertEqual(self.client.get("/reports").status_code, 200)
-        self.assertEqual(self.client.get("/login").status_code, 404)
+        self.assertEqual(self.client.get("/setup").status_code, 404)
 
     def test_optimizer_post_still_requires_csrf_token(self):
+        self.create_admin_and_login()
         response = self.client.post(
             "/assign",
             data={"data_mode": "manual"},
@@ -1056,6 +1098,7 @@ class TestPublicAccessSecurity(unittest.TestCase):
         self.assertIn(b"Security Token Invalid", response.data)
 
     def test_layout_recommendation_post_requires_csrf_token(self):
+        self.create_admin_and_login()
         response = self.client.post(
             "/api/layout-recommendations",
             data={},
@@ -1064,6 +1107,7 @@ class TestPublicAccessSecurity(unittest.TestCase):
         self.assertEqual(response.get_json()["error"]["code"], "csrf_failed")
 
     def test_public_pages_are_not_cached(self):
+        self.create_admin_and_login()
         page = self.client.get("/")
         self.assertEqual(page.status_code, 200)
         self.assertEqual(page.headers.get("Cache-Control"), "no-store")

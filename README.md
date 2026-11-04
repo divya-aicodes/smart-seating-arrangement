@@ -634,7 +634,8 @@ disconnected static-data demonstration layer.
 | ORM | Flask-SQLAlchemy / SQLAlchemy | Relational persistence and transactions |
 | Migrations | Flask-Migrate / Alembic | Versioned database schema |
 | Forms and CSRF | Flask-WTF | CSRF token generation and validation |
-| Session utilities | Flask-Login | User/session primitives retained by the backend model |
+| Authentication | Flask-Login | Secure sessions, account lockout, and role-aware access |
+| Rate limiting | Flask-Limiter | Global and login-specific request limits |
 | Graph mathematics | NetworkX | Graph construction, matching, coloring, and properties |
 | Symbolic mathematics | SymPy | Chromatic-polynomial expansion and factorization |
 | Spreadsheet reports | OpenPyXL | XLSX generation |
@@ -656,7 +657,7 @@ disconnected static-data demonstration layer.
 | `AcademicYear` | Institution-scoped dated academic year |
 | `Semester` | Dated semester within an academic year |
 | `Section` | Department and optional specialisation grouping for one semester |
-| `User` | Backend user and role record; the current public UI has no login or sign-up screen |
+| `User` | Institution-owned account with admin, planner, or viewer role |
 | `Dataset` | Versioned real or synthetic source boundary |
 | `Student` | Student identity, class, department, and accessibility requirement |
 | `StudentAcademicRecord` | Dated student-to-section history without duplicating student identity |
@@ -728,8 +729,12 @@ The legacy class and department text fields remain available for backward compat
 | `GET` | `/administration/rooms` | Paginated room and seat inventory |
 | `GET` | `/administration/jobs` | Durable background-job history and progress |
 | `GET` | `/administration/audit` | Privacy-bounded audit history |
+| `GET`, `POST` | `/administration/users` | Provision institution-scoped admin, planner, and viewer accounts |
 
-All project pages open directly; there is no login, sign-in, or sign-up page.
+All record-bearing pages require an authenticated institution account. There is no
+public sign-up. `/setup` creates the first administrator exactly once; production
+requires `INITIAL_SETUP_TOKEN`. Viewers can read, planners can run operational writes,
+and administrators can access administration/audits and publish seating runs.
 
 ## REST API
 
@@ -760,8 +765,9 @@ The API root is `/api/v1`.
 | `GET` | `/api/v1/seating-runs/<id>/allocations` | Paginated allocations |
 | `POST` | `/api/v1/seating-runs/<id>/publish` | Publish a completed run |
 
-Read endpoints are public in the current scope. State-changing API requests need
-a valid CSRF token and must pass the same-origin/exact-origin guard. See
+Record endpoints require an authenticated institution account. State-changing API
+requests additionally require planner/admin authorization, a valid CSRF token, and the
+same-origin/exact-origin guard. See
 [`API.md`](API.md) for response and error contracts.
 
 ## Frontend design
@@ -924,6 +930,9 @@ The local default database is SQLite at `instance/smart_seating.db`.
 | `CORS_ALLOW_CREDENTIALS` | `false` | Prefer `false` |
 | `ALLOWED_HOSTS` | Local hosts | Exact deployment hostnames |
 | `TRUST_PROXY_HEADERS` | `false` | Enable only behind a trusted proxy |
+| `INITIAL_SETUP_TOKEN` | Optional locally | Required until the first admin exists |
+| `RATE_LIMIT_STORAGE_URI` | `memory://` | Shared Redis URI for multiple replicas |
+| `RATE_LIMIT_DEFAULT` | `300 per minute` | Reviewed per-user/IP request limit |
 | `RUN_MIGRATIONS` | `false` | Platform-specific |
 
 Do not commit a real secret or production database URL.
@@ -939,7 +948,7 @@ python -m unittest discover -s tests -v
 The fast suite covers:
 
 - real and synthetic persistence;
-- public routes without login;
+- authentication, RBAC, tenant isolation, and anonymous API rejection;
 - database lineage and transactional allocations;
 - CSRF enforcement and exact-origin CORS;
 - blocked untrusted write origins;
@@ -981,6 +990,8 @@ SESSION_COOKIE_SAMESITE=Lax
 CORS_ALLOWED_ORIGINS=
 CORS_ALLOW_CREDENTIALS=false
 TRUST_PROXY_HEADERS=false
+INITIAL_SETUP_TOKEN=<one-time random setup secret>
+RATE_LIMIT_STORAGE_URI=<shared Redis URI for multi-instance limits>
 ```
 
 The Vercel build configuration runs:

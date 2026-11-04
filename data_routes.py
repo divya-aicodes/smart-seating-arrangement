@@ -18,6 +18,7 @@ from flask import (
     request,
     url_for,
 )
+from flask_login import current_user
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
@@ -168,7 +169,8 @@ def import_students():
                 ("import_stage:" + checksum + json.dumps(options, sort_keys=True)).encode("utf-8")
             ).hexdigest()
             job, reused_job = create_job(
-                "import_stage", payload, idempotency_key=idempotency_key, created_by="local-user"
+                "import_stage", payload, idempotency_key=idempotency_key,
+                created_by=current_user.username,
             )
             if reused_job:
                 delete_job_object(storage_key)
@@ -196,6 +198,7 @@ def import_students():
             session_name=options["session_name"],
             academic_year=options["academic_year"],
             chunk_size=options["chunk_size"],
+            institution_id=current_user.institution_id,
         )
         if reused:
             flash(
@@ -252,7 +255,7 @@ def commit_import(import_id: int):
                 idempotency_key=hashlib.sha256(
                     f"import_commit:{import_id}:{pending_import.checksum_sha256}".encode("utf-8")
                 ).hexdigest(),
-                created_by="local-user",
+                created_by=current_user.username,
             )
             if not reused:
                 try:

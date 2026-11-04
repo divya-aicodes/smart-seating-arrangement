@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Sign in | SeatPlan{% endblock %}
+{% block content %}
+<section class="auth-shell">
+    <div class="auth-card">
+        <p class="eyebrow">Secure institutional access</p>
+        <h1>Sign in to SeatPlan</h1>
+        <p>Use the account issued by your institution administrator.</p>
+        <form method="post" class="stacked-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label>Username<input name="username" autocomplete="username" required maxlength="80"></label>
+            <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
+            <button class="button button-primary" type="submit">Sign in</button>
+        </form>
+    </div>
+</section>
+{% endblock %}

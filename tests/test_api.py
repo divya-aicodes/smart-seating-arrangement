@@ -6,6 +6,7 @@ from datetime import date, datetime, timezone
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
 from app import app
+from flask import g
 from background_service import create_job
 from data_service import generate_synthetic_dataset
 from extensions import db
@@ -15,11 +16,13 @@ from models import (
     Exam,
     ExamRegistration,
     ExamSession,
+    Institution,
     Seat,
     SeatAllocation,
     SeatingRun,
     Student,
     Subject,
+    User,
 )
 
 
@@ -32,7 +35,21 @@ class TestRestApi(unittest.TestCase):
         self.context.push()
         db.drop_all()
         db.create_all()
+        institution = Institution(code="API", name="API Test Institution")
+        user = User(
+            institution=institution,
+            username="api-admin",
+            role="admin",
+            active=True,
+        )
+        user.set_password("TestingPass123")
+        db.session.add_all([institution, user])
+        db.session.commit()
+        g.institution_id = institution.id
         self.client = self.app.test_client()
+        with self.client.session_transaction() as session:
+            session["_user_id"] = str(user.id)
+            session["_fresh"] = True
 
     def tearDown(self):
         db.session.remove()
@@ -62,18 +79,25 @@ class TestRestApi(unittest.TestCase):
             "exam_date": "2026-12-02",
         }
 
-    def test_health_contract_and_records_are_public(self):
-        health = self.client.get("/api/v1/health")
+    def test_health_and_contract_are_public_but_records_require_authentication(self):
+        anonymous = self.app.test_client()
+        health = anonymous.get("/api/v1/health")
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.get_json()["database"], "reachable")
         self.assertEqual(health.get_json()["background_queue"], "disabled")
 
-        contract = self.client.get("/api/v1/openapi.json")
+        contract = anonymous.get("/api/v1/openapi.json")
         self.assertEqual(contract.status_code, 200)
         self.assertIn("/jobs/{job_id}", contract.get_json()["paths"])
         self.assertIn("/jobs", contract.get_json()["paths"])
         self.assertEqual(contract.get_json()["openapi"], "3.1.0")
 
+        denied = anonymous.get("/api/v1/datasets")
+        self.assertEqual(denied.status_code, 401)
+        self.assertEqual(denied.get_json()["error"]["code"], "authentication_required")
+
+        if hasattr(g, "_login_user"):
+            del g._login_user
         records = self.client.get("/api/v1/datasets")
         self.assertEqual(records.status_code, 200)
         self.assertEqual(records.get_json()["data"], [])

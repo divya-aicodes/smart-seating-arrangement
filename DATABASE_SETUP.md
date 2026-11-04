@@ -149,21 +149,18 @@ Keep `CORS_ALLOW_CREDENTIALS=false` unless cross-origin cookies are deliberately
 If enabled, use HTTPS, keep the allowlist narrow, and verify the CSRF flow from the
 separately hosted frontend before deployment.
 
-## Public access mode
+## Authentication and institution ownership
 
-The login, logout, sign-up, role-gating, and security-account pages have been removed.
-The optimizer, data management, reports, and REST resources open directly without a user
-account. Every POST form still includes an expiring CSRF token, untrusted cross-origin
-writes are rejected, responses are marked `no-store`, and business actions continue to
-be written to `audit_logs` under a system or local actor.
-
-This mode is convenient for a local demonstration but it does not provide user-level
-access control. A public deployment would expose institutional seating records to every
-visitor who can reach it, so use a trusted network or an external authentication gateway.
+After migration, open `/setup` once to create the first institution administrator.
+Production setup requires `INITIAL_SETUP_TOKEN`; there is no public sign-up route.
+Selecting the explicit legacy-data checkbox assigns currently unscoped records to that
+verified institution. Tenant filters then apply to datasets, students, subjects, exams,
+rooms, imports, seating runs, jobs, and audit records. Audits retain the authenticated
+user ID, role-labelled actor, institution, request ID, and source address.
 
 ## Phase 5 operational reports
 
-The current public interface can open `/reports` to review completed or published seating runs.
+Authenticated institution users can open `/reports` to review completed or published seating runs.
 Each report is generated from persisted exams, students, rooms, seats, registrations, and
 allocations. A pending, failed, or invalid run cannot be exported as an institutional
 report.

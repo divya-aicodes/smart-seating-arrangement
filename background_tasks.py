@@ -56,6 +56,7 @@ def stage_import_job(job_id):
                 chunk_size=payload["chunk_size"],
                 progress_callback=progress,
                 retry_existing=job.attempts > 1,
+                institution_id=job.institution_id,
             )
         complete_job(job.id, {
             "import_id": import_record.id,
@@ -116,6 +117,9 @@ def optimize_job(job_id):
         form["_background_job_id"] = str(job.id)
         with app.test_request_context("/assign", method="POST", data=form):
             from app import assign
+            from flask import g
+
+            g.institution_id = job.institution_id
 
             if not update_progress(job.id, 25, 100, "Running feasibility and optimization"):
                 return
@@ -172,6 +176,7 @@ def generate_report_job(job_id):
             "seating_run",
             run_id,
             after_values={"format": report_format, "background_job_id": job.id},
+            institution_id=job.institution_id,
         )
         complete_job(job.id, {
             "artifact_key": artifact_key,

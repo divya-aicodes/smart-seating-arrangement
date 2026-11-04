@@ -299,8 +299,18 @@ def openapi_document():
             ),
         },
         "servers": [{"url": "/api/v1"}],
+        "components": {
+            "securitySchemes": {
+                "sessionCookie": {
+                    "type": "apiKey",
+                    "in": "cookie",
+                    "name": current_app.config["SESSION_COOKIE_NAME"],
+                }
+            }
+        },
+        "security": [{"sessionCookie": []}],
         "paths": {
-            "/health": {"get": {"summary": "Check API and database readiness"}},
+            "/health": {"get": {"summary": "Check API and database readiness", "security": []}},
             "/datasets": {"get": {"summary": "List persisted datasets"}},
             "/datasets/{dataset_id}": {"get": {"summary": "Get a persisted dataset"}},
             "/datasets/synthetic": {

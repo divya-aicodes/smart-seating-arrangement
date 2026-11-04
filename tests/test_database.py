@@ -54,14 +54,19 @@ class TestDatabasePersistence(unittest.TestCase):
         self.context.push()
         db.create_all()
 
+        self.institution = Institution(code="TEST-DB", name="Database Test Institution")
         self.dataset = Dataset(
+            institution=self.institution,
             name="Institutional import",
             version="2026-10-12",
             source_type="real",
             status="active",
         )
-        self.subject = Subject(code="DM-101", name="Discrete Mathematics")
+        self.subject = Subject(
+            institution=self.institution, code="DM-101", name="Discrete Mathematics"
+        )
         self.student = Student(
+            institution=self.institution,
             student_code="STU-001",
             full_name="Test Student",
             class_name="CSE-A",
@@ -70,7 +75,9 @@ class TestDatabasePersistence(unittest.TestCase):
             dataset=self.dataset,
         )
         self.exam = Exam(
+            institution=self.institution,
             session=ExamSession(
+                institution=self.institution,
                 dataset=self.dataset,
                 exam_date=date(2026, 12, 1),
                 start_time=time(9, 0),
@@ -91,6 +98,7 @@ class TestDatabasePersistence(unittest.TestCase):
         )
         self.exam_session = self.exam.session
         self.room = Room(
+            institution=self.institution,
             room_number="A-101",
             building="Academic Block",
             floor="1",
@@ -170,6 +178,7 @@ class TestDatabasePersistence(unittest.TestCase):
 
     def test_duplicate_student_code_is_rejected(self):
         duplicate = Student(
+            institution=self.institution,
             student_code="STU-001",
             class_name="CSE-B",
             source_type="real",

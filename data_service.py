@@ -327,6 +327,7 @@ def stage_student_import(
     chunk_size: int = DEFAULT_IMPORT_CHUNK_SIZE,
     progress_callback=None,
     retry_existing: bool = False,
+    institution_id: int | None = None,
 ) -> tuple[DataImport, bool]:
     """Stream, validate, and persist CSV rows without touching operational student data."""
     original_filename = (getattr(file_storage, "filename", None) or "students.csv")[:255]
@@ -350,6 +351,7 @@ def stage_student_import(
         "end_time": end_time.isoformat(),
         "session_name": session_name,
         "academic_year": academic_year,
+        "institution_id": institution_id,
     }
     idempotency_key = hashlib.sha256(
         (checksum + json.dumps(options, sort_keys=True, separators=(",", ":"))).encode("utf-8")
@@ -383,6 +385,7 @@ def stage_student_import(
         import_record.chunk_size = chunk_size
     else:
         import_record = DataImport(
+            institution_id=institution_id,
             import_type="students",
             source_type="real",
             original_filename=original_filename,
@@ -547,6 +550,7 @@ def commit_staged_student_import(
         raise DataValidationError("The staged import metadata is incomplete.")
     if db.session.scalar(
         select(Dataset).where(
+            Dataset.institution_id == import_record.institution_id,
             Dataset.name == options["dataset_name"],
             Dataset.version == options["dataset_version"],
         )
@@ -557,6 +561,7 @@ def commit_staged_student_import(
     db.session.commit()
     try:
         dataset = Dataset(
+            institution_id=import_record.institution_id,
             name=options["dataset_name"],
             version=options["dataset_version"],
             source_type="real",
@@ -581,9 +586,15 @@ def commit_staged_student_import(
                 raise DataValidationError(
                     f"Subject code '{code}' is mapped to multiple subject names."
                 )
-            subject = db.session.scalar(select(Subject).where(Subject.code == code))
+            subject = db.session.scalar(
+                select(Subject).where(
+                    Subject.institution_id == import_record.institution_id,
+                    Subject.code == code,
+                )
+            )
             if subject is None:
                 subject = Subject(
+                    institution_id=import_record.institution_id,
                     code=code,
                     name=name,
                     department=department_name,
@@ -626,14 +637,21 @@ def commit_staged_student_import(
             existing_students = {
                 student.student_code: student
                 for student in db.session.scalars(
-                    select(Student).where(Student.student_code.in_(codes))
+                    select(Student).where(
+                        Student.institution_id == import_record.institution_id,
+                        Student.student_code.in_(codes),
+                    )
                 ).all()
             }
             registration_entries = []
             for row in staged_chunk:
                 student = existing_students.get(row.student_code)
                 if student is None:
-                    student = Student(student_code=row.student_code, source_type="real")
+                    student = Student(
+                        institution_id=import_record.institution_id,
+                        student_code=row.student_code,
+                        source_type="real",
+                    )
                     db.session.add(student)
                 elif student.source_type != "real":
                     raise DataValidationError(

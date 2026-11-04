@@ -7,8 +7,8 @@ records.
 ## Access and request security
 
 - Base path: `/api/v1`
-- Authentication: none; the application intentionally opens directly without sign-in
-- Authorization: no account or role gate is applied
+- Authentication: Flask-Login session cookie; only discovery, health, and OpenAPI are public
+- Authorization: viewer reads, planner operational writes, administrator publication and administration
 - CSRF: every state-changing request requires the session CSRF token in the
   `X-CSRF-Token` header
 - CORS: browser origins are denied unless they exactly match the application origin or
@@ -23,25 +23,22 @@ The API index is available at `/api/v1`, its machine-readable contract at
 
 | Method | Endpoint | Access | Purpose |
 |---|---|---|---|
-| GET | `/datasets` | public | List persisted real or synthetic datasets |
-| GET | `/datasets/{id}` | public | Dataset details and persisted counts |
-| POST | `/datasets/synthetic` | public + CSRF | Generate deterministic synthetic records |
-| GET | `/imports/{id}` | public | Read staged-import status, counters, and progress |
-| GET | `/imports/{id}/errors` | public | Read paginated row-level validation errors |
-| GET | `/jobs/{id}` | public | Read durable queued/running/completed/failed/cancelled job progress |
-| GET | `/exam-sessions`, `/exam-sessions/{id}` | public | Read sessions and their exact subject papers |
-| POST | `/exam-sessions` | public + CSRF | Create a dated examination session |
-| POST | `/exam-sessions/{id}/papers` | public + CSRF | Add one existing subject as a paper in the session |
-| POST | `/exam-registrations/bulk` | public + CSRF | Verify exact student-paper registrations atomically |
-| GET | `/exams`, `/exams/{id}` | public | Read persisted exam data |
-| GET | `/rooms`, `/rooms/{id}` | public | Read persisted room and seat-capacity data |
-| GET | `/seating-runs`, `/seating-runs/{id}` | public | Read persisted optimizer runs |
-| GET | `/seating-runs/{id}/allocations` | public | Read paginated allocations from valid runs |
-| POST | `/seating-runs/{id}/publish` | public + CSRF | Publish a completed valid run |
+| GET | `/datasets`, `/datasets/{id}` | authenticated | Institution-scoped dataset records |
+| POST | `/datasets/synthetic` | planner/admin + CSRF | Generate deterministic synthetic records |
+| GET | `/imports/{id}`, `/imports/{id}/errors` | authenticated | Institution-scoped import progress and errors |
+| GET | `/jobs`, `/jobs/{id}` | authenticated | Institution-scoped background-job progress |
+| GET | `/exam-sessions`, `/exam-sessions/{id}` | authenticated | Read sessions and exact papers |
+| POST | `/exam-sessions`, `/exam-sessions/{id}/papers` | planner/admin + CSRF | Manage sessions and papers |
+| POST | `/exam-registrations/bulk` | planner/admin + CSRF | Verify exact registrations atomically |
+| GET | `/exams`, `/exams/{id}` | authenticated | Read persisted exam data |
+| GET | `/rooms`, `/rooms/{id}` | authenticated | Read room and capacity data |
+| GET | `/seating-runs`, `/seating-runs/{id}/allocations` | authenticated | Read optimizer results |
+| POST | `/seating-runs/{id}/publish` | admin + CSRF | Publish a completed valid run |
 
-Because authentication has been removed, persisted student allocation data is available
-to anyone who can reach the deployment. Deploy only on a trusted network unless another
-access-control layer is placed in front of the application.
+Successful response bodies and endpoint paths remain backward compatible. Anonymous
+record requests now return the standard JSON error envelope with HTTP 401. Tenant
+filters return HTTP 404 for another institution's identifiers rather than revealing
+that the record exists.
 
 ## Sessions, papers, and registration conflicts
 

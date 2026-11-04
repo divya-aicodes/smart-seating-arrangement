@@ -6,6 +6,8 @@ allows the model metadata to be used by Flask-Migrate and isolated tests.
 
 from flask_migrate import Migrate
 from flask_login import LoginManager
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf.csrf import CSRFProtect
 from sqlalchemy import event
@@ -21,6 +23,18 @@ class Base(DeclarativeBase):
 db = SQLAlchemy(model_class=Base)
 migrate = Migrate()
 login_manager = LoginManager()
+
+
+def rate_limit_key():
+    """Prefer an authenticated identity; fall back to the effective client address."""
+    from flask_login import current_user
+
+    if current_user.is_authenticated:
+        return f"user:{current_user.get_id()}"
+    return f"ip:{get_remote_address()}"
+
+
+limiter = Limiter(key_func=rate_limit_key)
 csrf = CSRFProtect()
 
 

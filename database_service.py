@@ -32,6 +32,7 @@ def create_seating_run(
     if primary_paper is None:
         raise PersistenceError(f"Exam session {exam_session_id} has no papers.")
     run = SeatingRun(
+        institution_id=session.institution_id,
         exam_id=primary_paper.id,
         exam_session_id=session.id,
         solver_version=solver_version,
