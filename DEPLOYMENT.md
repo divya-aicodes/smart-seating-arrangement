@@ -1,8 +1,9 @@
-# Phase 7: production deployment
+# Production deployment
 
-The application is packaged as one Flask/Gunicorn web service backed by PostgreSQL.
-The same container serves the web interface and `/api/v1`; no static student, exam,
-room, or allocation records are introduced by deployment.
+The application is packaged as a Flask/Gunicorn web service and an optional Celery
+worker backed by PostgreSQL and Redis. PostgreSQL is the source of truth; Redis only
+transports task messages. No static student, exam, room, or allocation records are
+introduced by deployment.
 
 ## Production requirements
 
@@ -11,6 +12,8 @@ room, or allocation records are introduced by deployment.
 - A unique `SECRET_KEY` of at least 32 characters stored in the platform secret manager
 - Exact public hostnames in `ALLOWED_HOSTS`
 - Database migrations executed once before new application replicas receive traffic
+- Redis and at least one Celery worker when `BACKGROUND_JOBS_ENABLED=true`
+- Shared private storage or S3-compatible storage visible to both web and worker
 - A trusted network or external access-control gateway if records are not public
 
 Production mode fails closed when the secret is missing or placeholder-valued, the
@@ -45,11 +48,26 @@ docker compose --env-file .env.production up --build -d
 docker compose --env-file .env.production ps
 ```
 
-Compose starts PostgreSQL first, waits for it to become healthy, applies migrations, and
-then starts Gunicorn. PostgreSQL data is stored in the named `postgres-data` volume.
+Compose starts PostgreSQL and Redis, waits for them to become healthy, applies
+migrations, starts Gunicorn, and then starts the Celery worker. PostgreSQL data,
+Redis AOF data, and private job artifacts use separate named volumes.
 The web container is read-only apart from an in-memory `/tmp` filesystem. Port 8000 is
 bound to loopback by default so a host-level reverse proxy can reach it without exposing
 Gunicorn directly on every network interface.
+
+For multi-host deployments, replace the Compose local job volume with
+`JOB_STORAGE_BACKEND=s3` and configure `S3_BUCKET`, `S3_PREFIX`, optional
+`S3_ENDPOINT_URL`, and `S3_REGION`. Credentials use the standard AWS SDK environment
+or workload identity chain and must stay in the platform secret manager.
+
+Vercel does not run the persistent worker process defined here. Keep background jobs
+disabled on Vercel unless an external Redis service, Celery worker deployment, and
+shared/S3 artifact storage have all been configured. Synchronous behavior remains
+available when background jobs are disabled.
+
+After an unclean worker shutdown, run `flask --app app recover-stale-jobs` to mark
+jobs that have remained `running` for more than one hour as failed. Review their
+database side effects, then use the retry action; never delete job history from Redis.
 
 ## Reverse proxy and cookies
 
@@ -86,8 +104,9 @@ Alembic downgrade; never delete or recreate the production database to roll back
 
 Application logs are emitted as one JSON object per line and include a bounded
 `request_id` when a Flask request is active. Collect Gunicorn and application logs
-centrally and alert on repeated 5xx responses, failed health
-checks, database saturation, and rejected cross-origin writes. Back up PostgreSQL
+centrally and alert on repeated 5xx responses, failed health checks, jobs stuck in
+`running`, worker absence, Redis unavailability, database saturation, and rejected
+cross-origin writes. Back up PostgreSQL
 on a schedule appropriate to institutional recovery requirements. The project does not
 claim that backups, TLS, monitoring, or cloud deployment exist until they are configured
 and verified on the selected hosting platform.

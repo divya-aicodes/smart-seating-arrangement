@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Background Job #{{ job.id }} | SeatPlan{% endblock %}
+
+{% block content %}
+<section class="page-shell run-hero reveal" id="job-status" data-job-status-url="{{ url_for('jobs.status', job_id=job.id) }}">
+    <div>
+        <a class="back-link" href="{{ url_for('data.data_management') }}"><span aria-hidden="true">←</span> Data workspace</a>
+        <p class="eyebrow"><span>Background processing</span></p>
+        <h1>Job #{{ job.id }}</h1>
+        <p>{{ job.job_type.replace('_', ' ') | title }} · <strong data-job-state>{{ job.status }}</strong></p>
+    </div>
+</section>
+
+<section class="page-shell record-panel reveal">
+    <div class="record-panel-header"><div><h2 data-job-message>{{ job.progress_message or 'Queued' }}</h2><p>Important state is stored in PostgreSQL; Redis is used only to dispatch work.</p></div></div>
+    <div class="job-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <span data-job-progress></span>
+    </div>
+    <p><strong data-job-percentage>0%</strong></p>
+    <p class="error-message" data-job-error {% if not job.error_message %}hidden{% endif %}>{{ job.error_message or '' }}</p>
+    <div class="hero-actions no-print" data-job-actions>
+        {% if job.status in ['queued', 'running'] %}
+        <form method="post" action="{{ url_for('jobs.cancel', job_id=job.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-secondary" type="submit">Cancel safely</button></form>
+        {% elif job.status in ['failed', 'cancelled'] %}
+        <form method="post" action="{{ url_for('jobs.retry', job_id=job.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-primary" type="submit">Retry job</button></form>
+        {% endif %}
+        {% if job.status == 'completed' and job.result and job.result.result_url %}<a class="button button-primary" href="{{ job.result.result_url }}">Open result</a>{% endif %}
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+(() => {
+    const root = document.querySelector('[data-job-status-url]');
+    if (!root) return;
+    const progress = document.querySelector('[data-job-progress]');
+    const track = progress.closest('[role="progressbar"]');
+    const percentage = document.querySelector('[data-job-percentage]');
+    const state = document.querySelector('[data-job-state]');
+    const message = document.querySelector('[data-job-message]');
+    const error = document.querySelector('[data-job-error]');
+    if (!['queued', 'running'].includes(state.textContent.trim())) return;
+    const poll = async () => {
+        const response = await fetch(root.dataset.jobStatusUrl, {headers: {'Accept': 'application/json'}});
+        if (!response.ok) return;
+        const job = (await response.json()).data;
+        const value = Math.max(0, Math.min(100, job.progress.percentage));
+        progress.style.width = `${value}%`;
+        track.setAttribute('aria-valuenow', String(value));
+        percentage.textContent = `${value.toFixed(1)}%`;
+        state.textContent = job.status;
+        message.textContent = job.progress.message || job.status;
+        if (job.error) { error.hidden = false; error.textContent = job.error; }
+        if (['completed', 'failed', 'cancelled'].includes(job.status)) window.location.reload();
+        else window.setTimeout(poll, 1500);
+    };
+    poll().catch(() => window.setTimeout(poll, 3000));
+})();
+</script>
+{% endblock %}

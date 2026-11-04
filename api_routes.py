@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, time
 from typing import Any
 
-from flask import Blueprint, jsonify, request, url_for
+from flask import Blueprint, current_app, jsonify, request, url_for
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload
@@ -271,7 +271,18 @@ def health():
     except Exception:
         db.session.rollback()
         return _error("database_unavailable", "The database is not ready.", 503)
-    return jsonify({"status": "ok", "database": "reachable"})
+    queue_status = "disabled"
+    if current_app.config.get("BACKGROUND_JOBS_ENABLED"):
+        try:
+            from redis import Redis
+
+            client = Redis.from_url(current_app.config["CELERY_BROKER_URL"])
+            client.ping()
+            client.close()
+            queue_status = "reachable"
+        except Exception:
+            return _error("queue_unavailable", "The background queue is not ready.", 503)
+    return jsonify({"status": "ok", "database": "reachable", "background_queue": queue_status})
 
 
 @api_bp.get("/openapi.json")
@@ -300,6 +311,9 @@ def openapi_document():
             },
             "/imports/{import_id}/errors": {
                 "get": {"summary": "List row-level import errors"}
+            },
+            "/jobs/{job_id}": {
+                "get": {"summary": "Get durable background-job progress and result"}
             },
             "/exam-sessions": {
                 "get": {"summary": "List examination sessions"},

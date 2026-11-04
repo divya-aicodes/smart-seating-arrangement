@@ -6,6 +6,7 @@ from datetime import date, datetime, timezone
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
 from app import app
+from background_service import create_job
 from data_service import generate_synthetic_dataset
 from extensions import db
 from models import (
@@ -65,14 +66,26 @@ class TestRestApi(unittest.TestCase):
         health = self.client.get("/api/v1/health")
         self.assertEqual(health.status_code, 200)
         self.assertEqual(health.get_json()["database"], "reachable")
+        self.assertEqual(health.get_json()["background_queue"], "disabled")
 
         contract = self.client.get("/api/v1/openapi.json")
         self.assertEqual(contract.status_code, 200)
+        self.assertIn("/jobs/{job_id}", contract.get_json()["paths"])
         self.assertEqual(contract.get_json()["openapi"], "3.1.0")
 
         records = self.client.get("/api/v1/datasets")
         self.assertEqual(records.status_code, 200)
         self.assertEqual(records.get_json()["data"], [])
+
+    def test_background_job_progress_is_exposed_from_database(self):
+        job, _ = create_job(
+            "report_generation", {"run_id": 1, "format": "pdf", "progress_total": 100}
+        )
+        response = self.client.get(f"/api/v1/jobs/{job.id}")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()["data"]
+        self.assertEqual(payload["status"], "queued")
+        self.assertEqual(payload["progress"]["percentage"], 0.0)
 
     def test_can_generate_and_page_persisted_synthetic_data(self):
         token = self.csrf_token("/")

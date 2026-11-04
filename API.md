@@ -28,6 +28,7 @@ The API index is available at `/api/v1`, its machine-readable contract at
 | POST | `/datasets/synthetic` | public + CSRF | Generate deterministic synthetic records |
 | GET | `/imports/{id}` | public | Read staged-import status, counters, and progress |
 | GET | `/imports/{id}/errors` | public | Read paginated row-level validation errors |
+| GET | `/jobs/{id}` | public | Read durable queued/running/completed/failed/cancelled job progress |
 | GET | `/exam-sessions`, `/exam-sessions/{id}` | public | Read sessions and their exact subject papers |
 | POST | `/exam-sessions` | public + CSRF | Create a dated examination session |
 | POST | `/exam-sessions/{id}/papers` | public + CSRF | Add one existing subject as a paper in the session |
@@ -98,6 +99,17 @@ collection shape. Each item contains `row_number`, `error_code`, `message`, and 
 `raw_data`. The browser workflow also offers the same diagnostics as a formula-safe CSV
 download. Import creation and confirmation currently remain CSRF-protected web actions;
 the versioned write endpoints are planned for the API-security phase.
+
+## Background-job status
+
+`GET /api/v1/jobs/{id}` reads progress from PostgreSQL rather than from Redis. The
+response includes job type, state, current and total work, percentage, attempts,
+safe-cancellation state, timestamps, a bounded error message, and the result URL after
+completion. Private storage object keys and task payloads are never returned.
+
+Queued work uses `queued`, `running`, `completed`, `failed`, and `cancelled`. Retry and
+cancellation remain CSRF-protected browser actions. Redis is a transport and is not the
+permanent source of job history.
 
 ## Synthetic dataset request
 

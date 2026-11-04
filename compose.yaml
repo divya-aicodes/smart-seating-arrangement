@@ -16,11 +16,27 @@ services:
     networks:
       - backend
 
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - backend
+
   web:
     build: .
     restart: unless-stopped
     depends_on:
       database:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     environment:
       APP_ENV: production
@@ -33,6 +49,10 @@ services:
       ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Set ALLOWED_HOSTS in .env.production}
       HEALTHCHECK_HOST: ${HEALTHCHECK_HOST:?Set HEALTHCHECK_HOST in .env.production}
       TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
+      REDIS_URL: redis://redis:6379/0
+      BACKGROUND_JOBS_ENABLED: "true"
+      JOB_STORAGE_BACKEND: local
+      JOB_STORAGE_DIR: /app/instance/job-storage
       RUN_MIGRATIONS: "true"
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
       GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
@@ -41,6 +61,43 @@ services:
     ports:
       - "127.0.0.1:${APP_PORT:-8000}:8000"
     read_only: true
+    volumes:
+      - job-storage:/app/instance/job-storage
+    tmpfs:
+      - /tmp
+    networks:
+      - backend
+
+  worker:
+    build: .
+    restart: unless-stopped
+    entrypoint: ["/app/docker-worker-entrypoint.sh"]
+    depends_on:
+      web:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-smart_seating}:${POSTGRES_PASSWORD}@database:5432/${POSTGRES_DB:-smart_seating}
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env.production}
+      SESSION_COOKIE_SECURE: "true"
+      SESSION_COOKIE_SAMESITE: ${SESSION_COOKIE_SAMESITE:-Lax}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      CORS_ALLOW_CREDENTIALS: ${CORS_ALLOW_CREDENTIALS:-false}
+      ALLOWED_HOSTS: ${ALLOWED_HOSTS:?Set ALLOWED_HOSTS in .env.production}
+      HEALTHCHECK_HOST: ${HEALTHCHECK_HOST:?Set HEALTHCHECK_HOST in .env.production}
+      TRUST_PROXY_HEADERS: ${TRUST_PROXY_HEADERS:-true}
+      REDIS_URL: redis://redis:6379/0
+      BACKGROUND_JOBS_ENABLED: "true"
+      JOB_STORAGE_BACKEND: local
+      JOB_STORAGE_DIR: /app/instance/job-storage
+      RUN_MIGRATIONS: "false"
+      CELERY_CONCURRENCY: ${CELERY_CONCURRENCY:-2}
+      CELERY_MAX_TASKS_PER_CHILD: ${CELERY_MAX_TASKS_PER_CHILD:-100}
+    read_only: true
+    volumes:
+      - job-storage:/app/instance/job-storage
     tmpfs:
       - /tmp
     networks:
@@ -48,6 +105,8 @@ services:
 
 volumes:
   postgres-data:
+  redis-data:
+  job-storage:
 
 networks:
   backend:

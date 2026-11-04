@@ -162,6 +162,20 @@ def load_app_config(environ: Mapping[str, str] | None = None) -> dict[str, objec
     database_url = _database_url(
         values.get("DATABASE_URL"), is_production=is_production
     )
+    redis_url = values.get("REDIS_URL", "").strip()
+    celery_broker_url = values.get("CELERY_BROKER_URL", redis_url).strip()
+    background_jobs_enabled = _env_flag(
+        "BACKGROUND_JOBS_ENABLED", False, environ=values
+    )
+    if background_jobs_enabled and not celery_broker_url:
+        raise RuntimeError(
+            "CELERY_BROKER_URL or REDIS_URL is required when background jobs are enabled."
+        )
+    storage_backend = values.get("JOB_STORAGE_BACKEND", "local").strip().lower()
+    if storage_backend not in {"local", "s3"}:
+        raise RuntimeError("JOB_STORAGE_BACKEND must be local or s3.")
+    if storage_backend == "s3" and not values.get("S3_BUCKET", "").strip():
+        raise RuntimeError("S3_BUCKET is required when JOB_STORAGE_BACKEND=s3.")
     engine_options: dict[str, object] = {"pool_pre_ping": True}
     if database_url.startswith("postgresql+psycopg://"):
         engine_options.update({"pool_recycle": 300, "pool_size": 5, "max_overflow": 10})
@@ -182,6 +196,27 @@ def load_app_config(environ: Mapping[str, str] | None = None) -> dict[str, objec
             20_000,
             environ=values,
         ),
+        "BACKGROUND_JOBS_ENABLED": background_jobs_enabled,
+        "CELERY_BROKER_URL": celery_broker_url,
+        "CELERY_RESULT_BACKEND": values.get("CELERY_RESULT_BACKEND", "").strip(),
+        "BACKGROUND_IMPORT_MIN_BYTES": _env_int(
+            "BACKGROUND_IMPORT_MIN_BYTES", 512 * 1024, 1, MAX_REQUEST_BYTES, environ=values
+        ),
+        "BACKGROUND_IMPORT_COMMIT_MIN_ROWS": _env_int(
+            "BACKGROUND_IMPORT_COMMIT_MIN_ROWS", 10_000, 1, 500_000, environ=values
+        ),
+        "BACKGROUND_OPTIMIZATION_MIN_STUDENTS": _env_int(
+            "BACKGROUND_OPTIMIZATION_MIN_STUDENTS", 500, 1, MAX_STUDENTS, environ=values
+        ),
+        "BACKGROUND_REPORT_MIN_ALLOCATIONS": _env_int(
+            "BACKGROUND_REPORT_MIN_ALLOCATIONS", 1_000, 1, 500_000, environ=values
+        ),
+        "JOB_STORAGE_BACKEND": storage_backend,
+        "JOB_STORAGE_DIR": values.get("JOB_STORAGE_DIR", "instance/job-storage").strip(),
+        "S3_BUCKET": values.get("S3_BUCKET", "").strip(),
+        "S3_PREFIX": values.get("S3_PREFIX", "seatplan-jobs").strip().strip("/"),
+        "S3_ENDPOINT_URL": values.get("S3_ENDPOINT_URL", "").strip() or None,
+        "S3_REGION": values.get("S3_REGION", "").strip() or None,
         "SESSION_COOKIE_NAME": "smart_seating_session",
         "SESSION_COOKIE_HTTPONLY": True,
         "SESSION_COOKIE_SAMESITE": session_cookie_samesite,

@@ -137,6 +137,7 @@ class TestDatabasePersistence(unittest.TestCase):
         expected = {
             "academic_years",
             "audit_logs",
+            "background_jobs",
             "data_imports",
             "datasets",
             "departments",

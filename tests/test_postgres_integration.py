@@ -40,6 +40,7 @@ class TestPostgresIntegration(unittest.TestCase):
         tables = set(inspect(self.db.engine).get_table_names())
         self.assertTrue({
             "alembic_version",
+            "background_jobs",
             "institutions",
             "departments",
             "academic_years",
@@ -56,7 +57,7 @@ class TestPostgresIntegration(unittest.TestCase):
         version = self.db.session.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-        self.assertEqual(version, "e4f6a8b0c135")
+        self.assertEqual(version, "f5a7b9c1d246")
         seating_run_columns = {
             column["name"] for column in inspect(self.db.engine).get_columns("seating_runs")
         }

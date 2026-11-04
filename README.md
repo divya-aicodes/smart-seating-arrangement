@@ -70,7 +70,9 @@ The application is designed to:
    exports;
 6. provide browser, API, CSV, XLSX, and PDF workflows; and
 7. protect state-changing requests with CSRF, origin checks, input validation,
-   and production configuration guards.
+   and production configuration guards; and
+8. dispatch genuinely long imports, database optimizations, and reports through
+   durable PostgreSQL job records and Celery/Redis when workers are configured.
 
 ### Optimization boundary
 
@@ -628,6 +630,8 @@ disconnected static-data demonstration layer.
 | WSGI server | Gunicorn | Long-running production platforms |
 | Serverless hosting | Vercel Python runtime | Current public deployment |
 | Tests | Python `unittest` | Integration, security, persistence, and solver verification |
+| Background jobs | Celery 5.6 + Redis | Dispatch only; PostgreSQL stores authoritative status and results |
+| Artifact storage | Private local volume or S3-compatible storage | Large uploads and generated reports stay outside Redis |
 
 ## Database model
 
@@ -821,6 +825,11 @@ seating/
   seat_mapper.py              Strict greedy seat placement
   validator.py                Formal edge and mapping validation
   counting.py                 Product Rule and inclusion-exclusion
+background_service.py         Durable job lifecycle and retry state
+background_tasks.py           Celery import, optimization, and report tasks
+celery_app.py                 Queue configuration and worker entrypoint
+job_storage.py                Private local or S3-compatible artifact storage
+job_routes.py                 Progress, cancellation, retry, and downloads
 templates/
   base.html                   Shared page shell and navigation
   index.html                  Planning workspace
@@ -974,8 +983,12 @@ Additional documentation:
 - Registration verification currently records a trusted source supplied by the import
   or administrative API. Curriculum, elective, backlog, and supplementary eligibility
   entities still require a later reviewed academic-curriculum extension.
-- Large imports currently run synchronously in the upload request. Background workers,
-  object storage, cancellation, and durable job progress belong to Phase 5.
+- Celery execution requires a separately running worker and Redis broker. If they
+  are not configured, small and large operations continue through the existing
+  synchronous paths; the application never pretends a worker exists.
+- Vercel hosts the Flask web process but not a persistent Celery worker. The live
+  Vercel deployment therefore remains synchronous until external Redis, worker,
+  and shared or S3-compatible artifact storage are configured.
 - The 100,000- and 500,000-row targets have not yet been benchmarked. The row cap must
   not be interpreted as measured throughput or memory evidence.
 - Serverless hosts can impose request-body and execution-time limits below the

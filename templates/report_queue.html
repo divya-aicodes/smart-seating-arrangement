@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}Generate report | SeatPlan{% endblock %}
+
+{% block content %}
+<section class="page-shell error-page reveal">
+    <p class="eyebrow"><span>Large report</span></p>
+    <h1>Generate this report in the background</h1>
+    <p class="error-message">This seating run is large enough that generating the {{ report_format | upper }} inside a normal web request could time out. A worker will create it privately and provide a download when ready.</p>
+    <div class="error-actions">
+        <form method="post" action="{{ url_for('reports.queue_report', run_id=run_id, report_format=report_format) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="button button-primary" type="submit">Queue {{ report_format | upper }} report</button>
+        </form>
+        <a class="button button-secondary" href="{{ url_for('reports.run_detail', run_id=run_id) }}">Return to report</a>
+    </div>
+</section>
+{% endblock %}

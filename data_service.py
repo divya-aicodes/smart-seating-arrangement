@@ -12,7 +12,7 @@ import re
 from datetime import date, datetime, time, timezone
 from typing import Any
 
-from sqlalchemy import insert, select
+from sqlalchemy import delete, insert, select
 from sqlalchemy.exc import IntegrityError
 
 from exam_service import (
@@ -325,6 +325,8 @@ def stage_student_import(
     session_name: str,
     academic_year: str,
     chunk_size: int = DEFAULT_IMPORT_CHUNK_SIZE,
+    progress_callback=None,
+    retry_existing: bool = False,
 ) -> tuple[DataImport, bool]:
     """Stream, validate, and persist CSV rows without touching operational student data."""
     original_filename = (getattr(file_storage, "filename", None) or "students.csv")[:255]
@@ -339,7 +341,7 @@ def stage_student_import(
     if end_time <= start_time:
         raise DataValidationError("Exam end time must be later than start time.")
 
-    checksum, _total_bytes = _upload_checksum(file_storage)
+    checksum, total_bytes = _upload_checksum(file_storage)
     options = {
         "dataset_name": dataset_name,
         "dataset_version": dataset_version,
@@ -355,24 +357,46 @@ def stage_student_import(
     existing = db.session.scalar(
         select(DataImport).where(DataImport.idempotency_key == idempotency_key)
     )
-    if existing is not None:
+    restart_existing = existing is not None and (
+        existing.status in {"failed", "cancelled"}
+        or (retry_existing and existing.status == "processing")
+    )
+    if existing is not None and not restart_existing:
         return existing, True
 
-    import_record = DataImport(
-        import_type="students",
-        source_type="real",
-        original_filename=original_filename,
-        status="processing",
-        checksum_sha256=checksum,
-        idempotency_key=idempotency_key,
-        total_rows=0,
-        processed_rows=0,
-        valid_rows=0,
-        invalid_rows=0,
-        chunk_size=chunk_size,
-        import_options=options,
-    )
-    db.session.add(import_record)
+    if restart_existing:
+        db.session.execute(
+            delete(ImportStagingStudent).where(
+                ImportStagingStudent.data_import_id == existing.id
+            )
+        )
+        db.session.execute(
+            delete(ImportRowError).where(ImportRowError.data_import_id == existing.id)
+        )
+        import_record = existing
+        import_record.status = "processing"
+        import_record.total_rows = 0
+        import_record.processed_rows = 0
+        import_record.valid_rows = 0
+        import_record.invalid_rows = 0
+        import_record.error_report = None
+        import_record.chunk_size = chunk_size
+    else:
+        import_record = DataImport(
+            import_type="students",
+            source_type="real",
+            original_filename=original_filename,
+            status="processing",
+            checksum_sha256=checksum,
+            idempotency_key=idempotency_key,
+            total_rows=0,
+            processed_rows=0,
+            valid_rows=0,
+            invalid_rows=0,
+            chunk_size=chunk_size,
+            import_options=options,
+        )
+        db.session.add(import_record)
     try:
         db.session.commit()
     except IntegrityError as exc:
@@ -425,8 +449,24 @@ def stage_student_import(
 
             if len(valid_batch) + len(error_batch) >= chunk_size:
                 _flush_staging_batches(import_record, valid_batch, error_batch)
+                if progress_callback is not None:
+                    try:
+                        consumed = min(binary_stream.tell(), total_bytes)
+                    except (OSError, ValueError):
+                        consumed = min(total_bytes - 1, import_record.processed_rows)
+                    progress_callback(
+                        consumed,
+                        max(1, total_bytes),
+                        f"Validated {import_record.processed_rows:,} row(s)",
+                    )
 
         _flush_staging_batches(import_record, valid_batch, error_batch)
+        if progress_callback is not None:
+            progress_callback(
+                max(1, total_bytes),
+                max(1, total_bytes),
+                f"Validated {import_record.processed_rows:,} row(s)",
+            )
         if import_record.total_rows == 0:
             raise DataValidationError("The CSV does not contain any student records.")
         import_record.status = "validated" if import_record.valid_rows else "failed"
@@ -479,7 +519,9 @@ def _staging_chunks(import_id: int, chunk_size: int):
         last_row_number = chunk[-1].row_number
 
 
-def commit_staged_student_import(import_id: int) -> tuple[Dataset, Exam, DataImport]:
+def commit_staged_student_import(
+    import_id: int, *, progress_callback=None
+) -> tuple[Dataset, Exam, DataImport]:
     """Commit valid staged rows to operational tables in one database transaction."""
     import_record = db.session.get(DataImport, import_id)
     if import_record is None:
@@ -578,6 +620,7 @@ def commit_staged_student_import(import_id: int) -> tuple[Dataset, Exam, DataImp
             )
         ]
 
+        committed_rows = 0
         for staged_chunk in _staging_chunks(import_id, import_record.chunk_size):
             codes = [row.student_code for row in staged_chunk]
             existing_students = {
@@ -608,6 +651,13 @@ def commit_staged_student_import(import_id: int) -> tuple[Dataset, Exam, DataImp
                 register_students_for_session(
                     registration_entries[offset:offset + 500],
                     verification_source="csv_subject_code",
+                )
+            committed_rows += len(staged_chunk)
+            if progress_callback is not None:
+                progress_callback(
+                    committed_rows,
+                    max(1, import_record.valid_rows),
+                    f"Committed {committed_rows:,} of {import_record.valid_rows:,} row(s)",
                 )
 
         import_record.dataset = dataset

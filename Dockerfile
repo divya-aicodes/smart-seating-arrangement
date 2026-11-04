@@ -14,7 +14,7 @@ RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=app:app . .
-RUN chmod 0555 /app/docker-entrypoint.sh \
+RUN chmod 0555 /app/docker-entrypoint.sh /app/docker-worker-entrypoint.sh \
     && mkdir -p /app/instance \
     && chown app:app /app/instance
 

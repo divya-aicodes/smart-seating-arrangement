@@ -7,7 +7,11 @@ import json
 import io
 import os
 import re
+import shutil
 from datetime import date, time
+from pathlib import Path
+from unittest.mock import patch
+from uuid import uuid4
 from openpyxl import load_workbook
 from pypdf import PdfReader
 from werkzeug.datastructures import FileStorage
@@ -15,10 +19,14 @@ from werkzeug.datastructures import FileStorage
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
 from app import app, parse_csv_students, recommend_room_layouts, MAX_UPLOAD_BYTES
+from background_service import create_job
+from background_tasks import commit_import_job, generate_report_job, optimize_job, stage_import_job
 from data_service import stage_student_import
 from extensions import db
+from job_storage import put_bytes
 from models import (
     AuditLog,
+    BackgroundJob,
     DataImport,
     Dataset,
     Exam,
@@ -152,6 +160,157 @@ class TestFlaskIntegration(unittest.TestCase):
         self.assertEqual(DataImport.query.one().status, "failed")
         self.assertEqual(ImportRowError.query.count(), 1)
 
+    def test_background_import_task_reuses_streaming_stage_service(self):
+        csv_bytes = (
+            b"ID,Name,Class,Department,Subject_Code,Subject,Special_Needs\n"
+            b"BG001,Background Student,CSE-A,CSE,DM101,Discrete Mathematics,N\n"
+        )
+        storage_dir = (Path("instance") / f"test-worker-{uuid4()}").resolve()
+        previous_storage = self.app.config["JOB_STORAGE_DIR"]
+        try:
+            self.app.config["JOB_STORAGE_DIR"] = str(storage_dir)
+            storage_key = "uploads/background.csv"
+            put_bytes(storage_key, csv_bytes)
+            job, _ = create_job("import_stage", {
+                "filename": "background.csv",
+                "storage_key": storage_key,
+                "dataset_name": "Background Import",
+                "dataset_version": "v1",
+                "exam_date": "2026-12-01",
+                "start_time": "09:00:00",
+                "end_time": "12:00:00",
+                "session_name": "Morning",
+                "academic_year": "2026-27",
+                "chunk_size": 100,
+                "progress_total": len(csv_bytes),
+            })
+            stage_import_job.run(job.id)
+            db.session.expire_all()
+            saved_job = db.session.get(BackgroundJob, job.id)
+            self.assertEqual(saved_job.status, "completed")
+            self.assertEqual(saved_job.result["import_id"], DataImport.query.one().id)
+            self.assertEqual(DataImport.query.one().status, "validated")
+            commit_job, _ = create_job(
+                "import_commit",
+                {
+                    "import_id": DataImport.query.one().id,
+                    "progress_total": DataImport.query.one().valid_rows,
+                },
+            )
+            commit_import_job.run(commit_job.id)
+            db.session.expire_all()
+            self.assertEqual(db.session.get(BackgroundJob, commit_job.id).status, "completed")
+            self.assertEqual(DataImport.query.one().status, "completed")
+            self.assertEqual(Student.query.count(), 1)
+        finally:
+            self.app.config["JOB_STORAGE_DIR"] = previous_storage
+            shutil.rmtree(storage_dir, ignore_errors=True)
+
+    def test_large_import_is_queued_without_putting_file_bytes_in_redis(self):
+        csv_bytes = (
+            b"ID,Class,Subject\n"
+            b"Q001,CSE-A,Discrete Mathematics\n"
+        )
+        storage_dir = (Path("instance") / f"test-queued-upload-{uuid4()}").resolve()
+        previous = {
+            key: self.app.config[key]
+            for key in (
+                "BACKGROUND_JOBS_ENABLED",
+                "BACKGROUND_IMPORT_MIN_BYTES",
+                "JOB_STORAGE_DIR",
+            )
+        }
+        try:
+            self.app.config.update(
+                BACKGROUND_JOBS_ENABLED=True,
+                BACKGROUND_IMPORT_MIN_BYTES=1,
+                JOB_STORAGE_DIR=str(storage_dir),
+            )
+            with patch("data_routes.enqueue_job") as enqueue:
+                response = self.client.post(
+                    "/data/import-students",
+                    data={
+                        "dataset_name": "Queued Import",
+                        "dataset_version": "v1",
+                        "exam_date": "2026-12-01",
+                        "start_time": "09:00",
+                        "end_time": "12:00",
+                        "session_name": "Morning",
+                        "academic_year": "2026-27",
+                        "csv_file": (io.BytesIO(csv_bytes), "queued.csv"),
+                    },
+                    content_type="multipart/form-data",
+                )
+            job = BackgroundJob.query.one()
+            self.assertEqual(response.status_code, 302)
+            self.assertIn(f"/jobs/{job.id}", response.headers["Location"])
+            self.assertEqual(DataImport.query.count(), 0)
+            self.assertNotIn("file_bytes", job.payload)
+            self.assertTrue((storage_dir / job.payload["storage_key"]).is_file())
+            enqueue.assert_called_once()
+        finally:
+            self.app.config.update(previous)
+            shutil.rmtree(storage_dir, ignore_errors=True)
+
+    def test_failed_import_dispatch_keeps_private_upload_for_retry(self):
+        csv_bytes = (
+            b"ID,Name,Class,Department,Subject_Code,Subject,Special_Needs\n"
+            b"Q001,Asha Rao,CSE-A,CSE,DM101,Discrete Mathematics,N\n"
+        )
+        storage_dir = (Path.cwd() / "instance" / f"test-job-storage-{uuid4()}").resolve()
+        previous = {
+            key: self.app.config.get(key)
+            for key in (
+                "BACKGROUND_JOBS_ENABLED",
+                "BACKGROUND_IMPORT_MIN_BYTES",
+                "JOB_STORAGE_DIR",
+            )
+        }
+        try:
+            self.app.config.update(
+                BACKGROUND_JOBS_ENABLED=True,
+                BACKGROUND_IMPORT_MIN_BYTES=1,
+                JOB_STORAGE_DIR=str(storage_dir),
+            )
+            with patch("data_routes.enqueue_job", side_effect=RuntimeError("broker unavailable")):
+                response = self.client.post(
+                    "/data/import-students",
+                    data={
+                        "dataset_name": "Retryable Import",
+                        "dataset_version": "v1",
+                        "exam_date": "2026-12-01",
+                        "start_time": "09:00",
+                        "end_time": "12:00",
+                        "session_name": "Morning",
+                        "academic_year": "2026-27",
+                        "csv_file": (io.BytesIO(csv_bytes), "retryable.csv"),
+                    },
+                    content_type="multipart/form-data",
+                )
+            job = BackgroundJob.query.one()
+            self.assertEqual(response.status_code, 302)
+            self.assertEqual(job.status, "failed")
+            self.assertTrue((storage_dir / job.payload["storage_key"]).is_file())
+        finally:
+            self.app.config.update(previous)
+            shutil.rmtree(storage_dir, ignore_errors=True)
+
+    def test_failed_retry_dispatch_returns_job_to_failed_state(self):
+        job, _ = create_job("report_generation", {"run_id": 1, "format": "pdf"})
+        job.status = "failed"
+        db.session.commit()
+        previous = self.app.config.get("BACKGROUND_JOBS_ENABLED")
+        try:
+            self.app.config["BACKGROUND_JOBS_ENABLED"] = True
+            with patch("job_routes.enqueue_job", side_effect=RuntimeError("broker unavailable")):
+                response = self.client.post(f"/jobs/{job.id}/retry")
+            db.session.refresh(job)
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(job.status, "failed")
+            self.assertIn("retry could not be queued", job.error_message.lower())
+        finally:
+            self.app.config["BACKGROUND_JOBS_ENABLED"] = previous
+
     def test_staged_import_keeps_invalid_rows_visible_and_commits_only_after_confirmation(self):
         csv_bytes = (
             b"ID,Name,Class,Department,Subject_Code,Subject,Special_Needs\n"
@@ -255,6 +414,33 @@ class TestFlaskIntegration(unittest.TestCase):
         self.assertEqual(staged.valid_rows, 250)
         self.assertEqual(ImportStagingStudent.query.count(), 250)
 
+    def test_failed_staging_retry_reuses_record_without_duplicate_rows(self):
+        csv_bytes = b"ID,Class,Subject\nR001,CSE-A,Mathematics\n"
+        options = {
+            "dataset_name": "Retry Import",
+            "dataset_version": "v1",
+            "exam_date": date(2026, 12, 1),
+            "start_time": time(9, 0),
+            "end_time": time(12, 0),
+            "session_name": "Morning",
+            "academic_year": "2026-27",
+            "chunk_size": 100,
+        }
+        first, _ = stage_student_import(
+            FileStorage(stream=io.BytesIO(csv_bytes), filename="retry.csv"), **options
+        )
+        first.status = "failed"
+        db.session.commit()
+        retried, reused = stage_student_import(
+            FileStorage(stream=io.BytesIO(csv_bytes), filename="retry.csv"),
+            retry_existing=True,
+            **options,
+        )
+        self.assertFalse(reused)
+        self.assertEqual(retried.id, first.id)
+        self.assertEqual(retried.status, "validated")
+        self.assertEqual(ImportStagingStudent.query.count(), 1)
+
     def test_synthetic_generation_is_persisted_and_connected_to_frontend(self):
         res = self.client.post(
             "/data/generate-synthetic",
@@ -332,6 +518,93 @@ class TestFlaskIntegration(unittest.TestCase):
         self.assertEqual(
             AuditLog.query.filter_by(action="seating_report_exported").count(), 2
         )
+
+        previous_jobs = self.app.config["BACKGROUND_JOBS_ENABLED"]
+        previous_threshold = self.app.config["BACKGROUND_REPORT_MIN_ALLOCATIONS"]
+        previous_storage = self.app.config["JOB_STORAGE_DIR"]
+        report_storage = (Path("instance") / f"test-report-worker-{uuid4()}").resolve()
+        try:
+            self.app.config.update(
+                BACKGROUND_JOBS_ENABLED=True,
+                BACKGROUND_REPORT_MIN_ALLOCATIONS=1,
+                JOB_STORAGE_DIR=str(report_storage),
+            )
+            confirmation = self.client.get(f"/reports/runs/{run.id}.pdf")
+            self.assertEqual(confirmation.status_code, 200)
+            self.assertIn(b"Generate this report in the background", confirmation.data)
+            self.assertEqual(BackgroundJob.query.count(), 0)
+            with patch("report_routes.enqueue_job") as enqueue:
+                queued = self.client.post(f"/reports/runs/{run.id}/queue/pdf")
+            self.assertEqual(queued.status_code, 302)
+            report_job = BackgroundJob.query.one()
+            self.assertEqual(report_job.job_type, "report_generation")
+            enqueue.assert_called_once()
+            generate_report_job.run(report_job.id)
+            db.session.expire_all()
+            self.assertEqual(db.session.get(BackgroundJob, report_job.id).status, "completed")
+            download = self.client.get(f"/jobs/{report_job.id}/download")
+            self.assertEqual(download.status_code, 200)
+            self.assertEqual(download.content_type, "application/pdf")
+        finally:
+            self.app.config.update(
+                BACKGROUND_JOBS_ENABLED=previous_jobs,
+                BACKGROUND_REPORT_MIN_ALLOCATIONS=previous_threshold,
+                JOB_STORAGE_DIR=previous_storage,
+            )
+            shutil.rmtree(report_storage, ignore_errors=True)
+
+    def test_large_database_optimization_is_queued_by_identifier(self):
+        self.client.post(
+            "/data/generate-synthetic",
+            data={
+                "dataset_name": "Queued Optimization",
+                "dataset_version": "v1",
+                "seed": "121",
+                "student_count": "4",
+                "class_count": "2",
+                "subject_count": "2",
+                "room_count": "1",
+                "rows_per_room": "1",
+                "benches_per_row": "2",
+                "seats_per_bench": "2",
+                "exam_date": "2026-12-02",
+            },
+        )
+        session = ExamSession.query.one()
+        room = Room.query.one()
+        previous_jobs = self.app.config["BACKGROUND_JOBS_ENABLED"]
+        previous_threshold = self.app.config["BACKGROUND_OPTIMIZATION_MIN_STUDENTS"]
+        try:
+            self.app.config.update(
+                BACKGROUND_JOBS_ENABLED=True,
+                BACKGROUND_OPTIMIZATION_MIN_STUDENTS=1,
+            )
+            with patch("background_tasks.enqueue_job") as enqueue:
+                response = self.client.post(
+                    "/assign",
+                    data={
+                        "data_mode": "database",
+                        "exam_session_id": str(session.id),
+                        "room_ids": str(room.id),
+                        "invigilator_ratio": "20",
+                        "adjacency_rule": "orthogonal",
+                    },
+                )
+            job = BackgroundJob.query.one()
+            self.assertEqual(response.status_code, 302)
+            self.assertEqual(job.job_type, "seating_optimization")
+            self.assertNotIn("students", job.payload)
+            self.assertEqual(SeatingRun.query.count(), 0)
+            enqueue.assert_called_once()
+            optimize_job.run(job.id)
+            db.session.expire_all()
+            self.assertEqual(db.session.get(BackgroundJob, job.id).status, "completed")
+            self.assertEqual(SeatingRun.query.filter_by(status="completed").count(), 1)
+        finally:
+            self.app.config.update(
+                BACKGROUND_JOBS_ENABLED=previous_jobs,
+                BACKGROUND_OPTIMIZATION_MIN_STUDENTS=previous_threshold,
+            )
 
     def test_database_run_rejects_rooms_from_another_dataset(self):
         generation_form = {

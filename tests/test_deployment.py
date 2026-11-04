@@ -5,6 +5,8 @@ import subprocess
 import sys
 import unittest
 
+os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
+
 from app import _parse_allowed_hosts, _parse_cors_origins, app
 from config import JsonLogFormatter, load_app_config
 
@@ -76,6 +78,18 @@ class TestDeploymentConfiguration(unittest.TestCase):
             load_app_config({"IMPORT_CHUNK_SIZE": "99"})
         with self.assertRaises(RuntimeError):
             load_app_config({"IMPORT_CHUNK_SIZE": "not-a-number"})
+
+    def test_background_jobs_require_a_broker_and_validate_storage(self):
+        with self.assertRaisesRegex(RuntimeError, "CELERY_BROKER_URL or REDIS_URL"):
+            load_app_config({"BACKGROUND_JOBS_ENABLED": "true"})
+        configured = load_app_config({
+            "BACKGROUND_JOBS_ENABLED": "true",
+            "REDIS_URL": "redis://localhost:6379/0",
+        })
+        self.assertTrue(configured["BACKGROUND_JOBS_ENABLED"])
+        self.assertEqual(configured["CELERY_BROKER_URL"], "redis://localhost:6379/0")
+        with self.assertRaisesRegex(RuntimeError, "S3_BUCKET"):
+            load_app_config({"JOB_STORAGE_BACKEND": "s3"})
 
     def test_structured_log_formatter_emits_json(self):
         record = logging.LogRecord(

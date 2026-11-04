@@ -9,6 +9,7 @@ import json
 import math
 import os
 import secrets
+from datetime import datetime, timedelta, timezone
 from collections import Counter
 from urllib.parse import urlsplit
 # pyrefly: ignore [missing-import]
@@ -70,12 +71,24 @@ from database_service import complete_seating_run, create_seating_run  # noqa: E
 from data_routes import data_bp  # noqa: E402
 from report_routes import report_bp  # noqa: E402
 from api_routes import api_bp  # noqa: E402
+from job_routes import job_api_bp, job_bp  # noqa: E402
 from models import Exam, ExamRegistration, ExamSession, Room, Seat, Student  # noqa: E402
 from security import record_audit  # noqa: E402
 
 app.register_blueprint(data_bp)
 app.register_blueprint(report_bp)
 app.register_blueprint(api_bp)
+app.register_blueprint(job_bp)
+app.register_blueprint(job_api_bp)
+
+
+@app.cli.command("recover-stale-jobs")
+def recover_stale_jobs_command():
+    """Fail running jobs older than one hour so they can be reviewed and retried."""
+    from background_service import fail_stale_jobs
+
+    count = fail_stale_jobs(datetime.now(timezone.utc) - timedelta(hours=1))
+    print(f"Marked {count} stale background job(s) as failed.")
 
 
 def _allowed_request_origins():
@@ -782,6 +795,44 @@ def assign():
                 database_student_ids,
                 database_seat_ids,
             ) = load_database_assignment_inputs()
+            background_job_id = request.form.get("_background_job_id", "").strip()
+            if (
+                app.config["BACKGROUND_JOBS_ENABLED"]
+                and not background_job_id
+                and len(students) >= app.config["BACKGROUND_OPTIMIZATION_MIN_STUDENTS"]
+            ):
+                from background_service import create_job, fail_job
+                from background_tasks import enqueue_job
+
+                queued_form = {
+                    "data_mode": "database",
+                    "exam_session_id": str(persisted_session.id),
+                    "room_ids": [str(room["room_id"]) for room in room_configs],
+                    "invigilator_ratio": str(students_per_invigilator),
+                    "adjacency_rule": adjacency_rule,
+                }
+                job, _ = create_job(
+                    "seating_optimization",
+                    {"form": queued_form, "progress_total": 100},
+                    created_by="local-user",
+                )
+                try:
+                    enqueue_job(job)
+                except Exception as exc:
+                    fail_job(job.id, "The optimization could not be queued.")
+                    raise ValueError(
+                        "The background optimization could not be queued. Check Redis and worker availability."
+                    ) from exc
+                record_audit(
+                    "seating_optimization_queued",
+                    "background_job",
+                    job.id,
+                    after_values={
+                        "exam_session_id": persisted_session.id,
+                        "student_count": len(students),
+                    },
+                )
+                return redirect(url_for("jobs.detail", job_id=job.id))
         else:
             num_rooms = parse_bounded_int("num_rooms", 1, 1, 10, "Number of rooms")
             rows = parse_bounded_int("rows", 4, 1, 20, "Rows per room")
@@ -934,7 +985,11 @@ def assign():
                 persisted_session.id,
                 solver_metadata,
                 solver_version=solver_version,
-                created_by="local-user",
+                created_by=(
+                    f"background-job:{request.form.get('_background_job_id')}"
+                    if request.form.get("_background_job_id")
+                    else "local-user"
+                ),
             )
             relaxed_student_ids = {
                 violation[student_key]

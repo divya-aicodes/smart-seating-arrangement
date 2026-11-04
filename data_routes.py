@@ -1,9 +1,11 @@
 """Server-rendered data-management routes for real and synthetic datasets."""
 
 import csv
+import hashlib
 import io
 import json
 from datetime import date, datetime
+from uuid import uuid4
 
 from flask import (
     Blueprint,
@@ -26,7 +28,11 @@ from data_service import (
     generate_synthetic_dataset,
     stage_student_import,
 )
+from background_service import create_job, fail_job
+from background_tasks import enqueue_job
 from extensions import db
+from job_storage import delete as delete_job_object
+from job_storage import put_stream
 from models import DataImport, Dataset, ExamSession, ImportRowError, Room, Student
 from security import record_audit
 
@@ -107,16 +113,67 @@ def import_students():
         flash("Select a CSV file to import.", "error")
         return redirect(url_for("data.data_management"))
     try:
+        exam_date = _form_date("exam_date", "Exam date")
+        start_time = _form_time("start_time", "Start time")
+        end_time = _form_time("end_time", "End time")
+        options = {
+            "dataset_name": request.form.get("dataset_name", ""),
+            "dataset_version": request.form.get("dataset_version", ""),
+            "exam_date": exam_date.isoformat(),
+            "start_time": start_time.isoformat(),
+            "end_time": end_time.isoformat(),
+            "session_name": request.form.get("session_name", ""),
+            "academic_year": request.form.get("academic_year", ""),
+            "chunk_size": int(current_app.config["IMPORT_CHUNK_SIZE"]),
+        }
+        stream = csv_file.stream
+        stream.seek(0, 2)
+        upload_size = stream.tell()
+        stream.seek(0)
+        if (
+            current_app.config["BACKGROUND_JOBS_ENABLED"]
+            and upload_size >= current_app.config["BACKGROUND_IMPORT_MIN_BYTES"]
+        ):
+            storage_key = f"uploads/{uuid4()}.csv"
+            total_bytes, checksum = put_stream(storage_key, stream)
+            payload = {
+                **options,
+                "filename": csv_file.filename[:255],
+                "storage_key": storage_key,
+                "progress_total": max(1, total_bytes),
+            }
+            idempotency_key = hashlib.sha256(
+                ("import_stage:" + checksum + json.dumps(options, sort_keys=True)).encode("utf-8")
+            ).hexdigest()
+            job, reused_job = create_job(
+                "import_stage", payload, idempotency_key=idempotency_key, created_by="local-user"
+            )
+            if reused_job:
+                delete_job_object(storage_key)
+            else:
+                try:
+                    enqueue_job(job)
+                except Exception as exc:
+                    fail_job(job.id, "The import could not be queued. Check Redis and worker availability.")
+                    raise DataValidationError("The background import could not be queued.") from exc
+            record_audit(
+                "real_dataset_import_queued",
+                "background_job",
+                job.id,
+                after_values={"bytes": total_bytes, "reused": reused_job},
+            )
+            return redirect(url_for("jobs.detail", job_id=job.id))
+
         import_record, reused = stage_student_import(
             csv_file,
-            dataset_name=request.form.get("dataset_name", ""),
-            dataset_version=request.form.get("dataset_version", ""),
-            exam_date=_form_date("exam_date", "Exam date"),
-            start_time=_form_time("start_time", "Start time"),
-            end_time=_form_time("end_time", "End time"),
-            session_name=request.form.get("session_name", ""),
-            academic_year=request.form.get("academic_year", ""),
-            chunk_size=int(current_app.config["IMPORT_CHUNK_SIZE"]),
+            dataset_name=options["dataset_name"],
+            dataset_version=options["dataset_version"],
+            exam_date=exam_date,
+            start_time=start_time,
+            end_time=end_time,
+            session_name=options["session_name"],
+            academic_year=options["academic_year"],
+            chunk_size=options["chunk_size"],
         )
         if reused:
             flash(
@@ -160,6 +217,28 @@ def import_students():
 @data_bp.post("/data/imports/<int:import_id>/commit")
 def commit_import(import_id: int):
     try:
+        pending_import = db.session.get(DataImport, import_id)
+        if (
+            pending_import is not None
+            and current_app.config["BACKGROUND_JOBS_ENABLED"]
+            and pending_import.valid_rows
+            >= current_app.config["BACKGROUND_IMPORT_COMMIT_MIN_ROWS"]
+        ):
+            job, reused = create_job(
+                "import_commit",
+                {"import_id": import_id, "progress_total": pending_import.valid_rows},
+                idempotency_key=hashlib.sha256(
+                    f"import_commit:{import_id}:{pending_import.checksum_sha256}".encode("utf-8")
+                ).hexdigest(),
+                created_by="local-user",
+            )
+            if not reused:
+                try:
+                    enqueue_job(job)
+                except Exception as exc:
+                    fail_job(job.id, "The import commit could not be queued.")
+                    raise DataValidationError("The background import commit could not be queued.") from exc
+            return redirect(url_for("jobs.detail", job_id=job.id))
         dataset, exam, import_record = commit_staged_student_import(import_id)
         flash(
             f"Committed {import_record.valid_rows:,} verified rows to '{dataset.name}' "

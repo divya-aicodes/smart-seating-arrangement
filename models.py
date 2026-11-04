@@ -722,6 +722,44 @@ class DataImport(TimestampMixin, db.Model):
     )
 
 
+class BackgroundJob(TimestampMixin, db.Model):
+    """Durable source of truth for work dispatched through Celery."""
+
+    __tablename__ = "background_jobs"
+    __table_args__ = (
+        CheckConstraint(
+            "job_type IN ('import_stage', 'import_commit', 'seating_optimization', 'report_generation')",
+            name="ck_background_jobs_type",
+        ),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'completed', 'failed', 'cancelled')",
+            name="ck_background_jobs_status",
+        ),
+        CheckConstraint("progress_current >= 0", name="ck_background_jobs_progress_current"),
+        CheckConstraint("progress_total >= 0", name="ck_background_jobs_progress_total"),
+        Index("ix_background_jobs_type_status", "job_type", "status"),
+        Index("ix_background_jobs_created_status", "created_at", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True, index=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(64), unique=True, index=True)
+    job_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
+    progress_current: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_total: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    progress_message: Mapped[str | None] = mapped_column(String(250))
+    payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cancellation_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_by: Mapped[str | None] = mapped_column(String(150))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class ImportStagingStudent(TimestampMixin, db.Model):
     __tablename__ = "import_staging_students"
     __table_args__ = (
