@@ -46,6 +46,8 @@ class TestFlaskIntegration(unittest.TestCase):
         self.assertIn(b"data-layout-recommendations", response.data)
         self.assertIn(b"Maximum seats in one room", response.data)
         self.assertIn(b"Maximum rooms available", response.data)
+        self.assertNotIn(b"Paste CSV text", response.data)
+        self.assertNotIn(b"student_data_text", response.data)
 
     def test_sample_csv_downloads(self):
         for preset in ["balanced", "pigeonhole", "multiroom"]:
@@ -242,15 +244,15 @@ class TestFlaskIntegration(unittest.TestCase):
             "accessible_rule": "row_1_and_aisle",
             "invigilator_ratio": "20",
             "adjacency_rule": "orthogonal",
-            "student_data_text": (
-                "ID,Class,Subject,Special_Needs\n"
-                "S1,ClassA,DiscreteMath,Y\n"
-                "S2,ClassB,Algorithms,N\n"
-                "S3,ClassA,DiscreteMath,N\n"
-                "S4,ClassB,Algorithms,N\n"
-                "S5,ClassA,DiscreteMath,N\n"
-                "S6,ClassB,Algorithms,N\n"
-            )
+            "csv_file": (io.BytesIO(
+                b"ID,Class,Subject,Special_Needs\n"
+                b"S1,ClassA,DiscreteMath,Y\n"
+                b"S2,ClassB,Algorithms,N\n"
+                b"S3,ClassA,DiscreteMath,N\n"
+                b"S4,ClassB,Algorithms,N\n"
+                b"S5,ClassA,DiscreteMath,N\n"
+                b"S6,ClassB,Algorithms,N\n"
+            ), "students.csv")
         }
         res = self.client.post("/assign", data=form_data)
         self.assertEqual(res.status_code, 200)
@@ -278,9 +280,9 @@ class TestFlaskIntegration(unittest.TestCase):
                         "accessible_rule": "row_1_and_aisle",
                         "invigilator_ratio": "20",
                         "adjacency_rule": "orthogonal",
-                        "student_data_text": (
-                            "ID,Class,Subject,Special_Needs\n" + students
-                        ),
+                        "csv_file": (io.BytesIO(
+                            ("ID,Class,Subject,Special_Needs\n" + students).encode("utf-8")
+                        ), "students.csv"),
                     },
                 )
                 self.assertEqual(response.status_code, 200)
@@ -296,7 +298,9 @@ class TestFlaskIntegration(unittest.TestCase):
             "cols": "2",
             "seats_per_bench": "2",
             "accessible_rule": "row_1",
-            "student_data_text": f"ID,Class,Subject,Special_Needs\n{students}"
+            "csv_file": (io.BytesIO(
+                f"ID,Class,Subject,Special_Needs\n{students}".encode("utf-8")
+            ), "students.csv")
         }
         res = self.client.post("/assign", data=form_data)
         self.assertEqual(res.status_code, 422)
@@ -321,7 +325,7 @@ class TestFlaskIntegration(unittest.TestCase):
         response = self.client.post(
             "/api/layout-recommendations",
             data={
-                "student_data_text": csv_text,
+                "csv_file": (io.BytesIO(csv_text.encode("utf-8")), "students.csv"),
                 "adjacency_rule": "orthogonal",
                 "accessible_rule": "row_1_and_aisle",
             },
@@ -378,9 +382,9 @@ class TestFlaskIntegration(unittest.TestCase):
                 "accessible_rule": "row_1_and_aisle",
                 "invigilator_ratio": "20",
                 "adjacency_rule": "orthogonal",
-                "student_data_text": (
-                    "ID,Class,Subject,Special_Needs\n" + "\n".join(students)
-                ),
+                "csv_file": (io.BytesIO(
+                    ("ID,Class,Subject,Special_Needs\n" + "\n".join(students)).encode("utf-8")
+                ), "students.csv"),
             },
         )
 
@@ -396,9 +400,9 @@ class TestFlaskIntegration(unittest.TestCase):
         response = self.client.post(
             "/api/layout-recommendations",
             data={
-                "student_data_text": (
-                    "ID,Class,Subject,Special_Needs\n" + students
-                ),
+                "csv_file": (io.BytesIO(
+                    ("ID,Class,Subject,Special_Needs\n" + students).encode("utf-8")
+                ), "students.csv"),
                 "max_seats_per_room": "24",
                 "max_rooms": "5",
             },
@@ -420,9 +424,9 @@ class TestFlaskIntegration(unittest.TestCase):
         response = self.client.post(
             "/api/layout-recommendations",
             data={
-                "student_data_text": (
-                    "ID,Class,Subject,Special_Needs\n" + students
-                ),
+                "csv_file": (io.BytesIO(
+                    ("ID,Class,Subject,Special_Needs\n" + students).encode("utf-8")
+                ), "students.csv"),
                 "max_seats_per_room": "20",
                 "max_rooms": "2",
             },
@@ -437,7 +441,12 @@ class TestFlaskIntegration(unittest.TestCase):
     def test_layout_recommendation_api_rejects_invalid_csv(self):
         response = self.client.post(
             "/api/layout-recommendations",
-            data={"student_data_text": "Name,Subject\nAsha,Math\n"},
+            data={
+                "csv_file": (
+                    io.BytesIO(b"Name,Subject\nAsha,Math\n"),
+                    "students.csv",
+                )
+            },
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()["error"]["code"], "invalid_student_data")
@@ -486,7 +495,6 @@ class TestFlaskIntegration(unittest.TestCase):
     def test_invalid_room_configuration_returns_400(self):
         res = self.client.post("/assign", data={
             "num_rooms": "0",
-            "student_data_text": "ID,Class\nS1,ClassA\n",
         })
         self.assertEqual(res.status_code, 400)
         self.assertIn(b"Number of rooms must be between 1 and 10", res.data)
@@ -516,7 +524,12 @@ class TestFlaskIntegration(unittest.TestCase):
     def test_oversized_request_returns_413(self):
         res = self.client.post(
             "/assign",
-            data={"student_data_text": "x" * (MAX_UPLOAD_BYTES + 1)},
+            data={
+                "csv_file": (
+                    io.BytesIO(b"x" * (MAX_UPLOAD_BYTES + 1)),
+                    "students.csv",
+                )
+            },
         )
         self.assertEqual(res.status_code, 413)
         self.assertIn(b"Upload Too Large", res.data)
@@ -582,7 +595,7 @@ class TestPublicAccessSecurity(unittest.TestCase):
     def test_optimizer_post_still_requires_csrf_token(self):
         response = self.client.post(
             "/assign",
-            data={"data_mode": "manual", "student_data_text": "ID,Class\nS1,A\n"},
+            data={"data_mode": "manual"},
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn(b"Security Token Invalid", response.data)
@@ -590,7 +603,7 @@ class TestPublicAccessSecurity(unittest.TestCase):
     def test_layout_recommendation_post_requires_csrf_token(self):
         response = self.client.post(
             "/api/layout-recommendations",
-            data={"student_data_text": "ID,Class\nS1,A\n"},
+            data={},
         )
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()["error"]["code"], "csrf_failed")

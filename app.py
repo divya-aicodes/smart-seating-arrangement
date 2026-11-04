@@ -680,13 +680,10 @@ def layout_recommendations():
             "Maximum rooms available",
         )
         csv_file = request.files.get("csv_file")
-        manual_text = request.form.get("student_data_text", "").strip()
         if csv_file and csv_file.filename:
             students = parse_csv_students(csv_file)
-        elif manual_text:
-            students = parse_csv_students(manual_text)
         else:
-            raise ValueError("Upload a student CSV or paste CSV data to calculate layouts.")
+            raise ValueError("Upload a student CSV to calculate layouts.")
 
         recommendations = recommend_room_layouts(
             students,
@@ -881,13 +878,10 @@ def assign():
             )
 
             csv_file = request.files.get("csv_file")
-            manual_text = request.form.get("student_data_text", "").strip()
             if csv_file and csv_file.filename:
                 students = parse_csv_students(csv_file)
-            elif manual_text:
-                students = parse_csv_students(manual_text)
             else:
-                raise ValueError("Upload a student CSV or enter CSV data for a manual run.")
+                raise ValueError("Upload a student CSV for a manual run.")
 
         num_rooms = len(room_configs)
             

@@ -153,12 +153,11 @@ function createCapacityItem(text, strong = false) {
 function initLayoutRecommendations() {
     const workspace = document.querySelector("[data-layout-recommendations]");
     const csvInput = document.getElementById("csv_file");
-    const textInput = document.getElementById("student_data_text");
     const accessibility = document.getElementById("accessible_rule");
     const maxSeatsPerRoom = document.getElementById("max_seats_per_room");
     const maxRooms = document.getElementById("max_rooms");
     const adjacencyInputs = Array.from(document.querySelectorAll("input[name='adjacency_rule']"));
-    if (!workspace || !csvInput || !textInput || !accessibility || !maxSeatsPerRoom || !maxRooms || !adjacencyInputs.length) return;
+    if (!workspace || !csvInput || !accessibility || !maxSeatsPerRoom || !maxRooms || !adjacencyInputs.length) return;
 
     const empty = workspace.querySelector("[data-recommendation-empty]");
     const loading = workspace.querySelector("[data-recommendation-loading]");
@@ -176,7 +175,7 @@ function initLayoutRecommendations() {
         });
     };
 
-    const hasRecords = () => Boolean(csvInput.files?.[0] || textInput.value.trim());
+    const hasRecords = () => Boolean(csvInput.files?.[0]);
 
     const calculate = async () => {
         window.clearTimeout(debounceTimer);
@@ -193,8 +192,7 @@ function initLayoutRecommendations() {
 
         const formData = new FormData();
         const file = csvInput.files?.[0];
-        if (file) formData.append("csv_file", file);
-        else formData.append("student_data_text", textInput.value);
+        formData.append("csv_file", file);
         formData.append("csrf_token", csrfToken);
         formData.append("accessible_rule", accessibility.value);
         formData.append("max_seats_per_room", maxSeatsPerRoom.value);
@@ -229,7 +227,6 @@ function initLayoutRecommendations() {
     };
 
     csvInput.addEventListener("change", calculate);
-    textInput.addEventListener("input", schedule);
     accessibility.addEventListener("change", calculate);
     maxSeatsPerRoom.addEventListener("input", schedule);
     maxRooms.addEventListener("input", schedule);

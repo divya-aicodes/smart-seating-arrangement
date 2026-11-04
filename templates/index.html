@@ -111,14 +111,14 @@
                     <div>
                         <p class="section-kicker">Candidates</p>
                         <h2 id="records-heading">Add student records</h2>
-                        <p>Upload or paste the CSV first. The next step will calculate room choices from these records.</p>
+                        <p>Upload the student CSV first. The next step will calculate room choices from these records.</p>
                     </div>
                     <a class="text-link" href="{{ url_for('sample_csv') }}">Download empty template <span aria-hidden="true">↓</span></a>
                 </header>
 
                 <div class="record-input-grid">
                     <div class="upload-panel">
-                        <div class="input-method-label"><span>A</span> Upload a CSV file</div>
+                        <div class="input-method-label">Upload a CSV file</div>
                         <label class="file-drop" for="csv_file" data-file-control>
                             <input id="csv_file" name="csv_file" type="file" accept=".csv,text/csv" aria-describedby="csv_file_status" data-file-input>
                             <span class="file-drop-icon" aria-hidden="true">
@@ -128,13 +128,6 @@
                             <small id="csv_file_status" data-file-name aria-live="polite">No file selected</small>
                         </label>
                         <p class="schema-note"><strong>Accepted columns</strong> ID, Name, Class, Department, Subject_Code, Subject, Special_Needs</p>
-                    </div>
-
-                    <div class="paste-panel">
-                        <div class="input-method-label"><span>B</span> Paste CSV text</div>
-                        <label class="sr-only" for="student_data_text">Student CSV text</label>
-                        <textarea id="student_data_text" name="student_data_text" class="field-control code-input" rows="10" placeholder="ID,Class,Subject,Special_Needs&#10;STU001,CSE-A,Discrete Mathematics,N"></textarea>
-                        <small class="field-help">Keep the header row. Leave this blank when uploading a file.</small>
                     </div>
                 </div>
             </div>
@@ -172,7 +165,7 @@
                 <div class="recommendation-workspace" data-layout-recommendations data-endpoint="{{ url_for('layout_recommendations') }}" aria-live="polite">
                     <div class="recommendation-empty" data-recommendation-empty>
                         <span class="recommendation-empty-number">01</span>
-                        <div><strong>Add student records to see room options</strong><p>After a valid CSV is selected or pasted, this area will show one-click setups based on student count, class distribution and accessibility requests.</p></div>
+                        <div><strong>Add student records to see room options</strong><p>After a valid CSV is selected, this area will show one-click setups based on student count, class distribution and accessibility requests.</p></div>
                     </div>
                     <div class="recommendation-loading" data-recommendation-loading hidden>
                         <span class="recommendation-spinner" aria-hidden="true"></span>

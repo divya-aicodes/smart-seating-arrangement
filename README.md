@@ -92,7 +92,7 @@ constraint rejection and a complete post-allocation validation pass.
 ### Planning
 
 - Select a persisted exam and rooms from one versioned dataset.
-- Run an ad hoc plan from uploaded CSV data or pasted CSV text.
+- Run an ad hoc plan from an uploaded student CSV file.
 - Choose orthogonal or orthogonal-plus-diagonal adjacency.
 - Configure one to ten manual rooms and their physical layout.
 - Mark front-row, aisle, combined, or front-aisle-only accessible positions.
@@ -536,7 +536,7 @@ Their `source_type` and dataset lineage remain explicit.
 
 ### Manual planning data
 
-Manual mode accepts the same student fields from an uploaded or pasted CSV and
+Manual mode accepts the same student fields from an uploaded CSV and
 constructs room geometry from the form. Before generation, the planner sends the
 CSV to a CSRF- and origin-protected same-origin endpoint. The backend validates
 the records and returns up to three one-click layout choices based on capacity,

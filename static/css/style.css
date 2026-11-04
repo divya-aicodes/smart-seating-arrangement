@@ -189,10 +189,9 @@ code { padding: 0.12rem 0.3rem; background: var(--surface-alt); border: 1px soli
 .capacity-strip { margin-top: 1rem; padding: 0.78rem 0.9rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; background: var(--surface-alt); border-left: 4px solid var(--blue); color: var(--ink-soft); font-family: var(--font-mono); font-size: 0.72rem; }
 .capacity-strip strong { color: var(--navy); font-family: var(--font-body); font-size: 0.8rem; }
 .capacity-strip span:not(:last-child)::after { content: "/"; margin-left: 1rem; color: #9aa6ad; }
-.record-input-grid { display: grid; grid-template-columns: minmax(260px, 0.8fr) minmax(360px, 1.2fr); gap: 1rem; }
-.upload-panel, .paste-panel { min-width: 0; padding: 1rem; background: #fafbfa; border: 1px solid var(--line); }
+.record-input-grid { display: grid; grid-template-columns: minmax(0, 760px); gap: 1rem; }
+.upload-panel { min-width: 0; padding: 1rem; background: #fafbfa; border: 1px solid var(--line); }
 .input-method-label { margin-bottom: 0.8rem; display: flex; align-items: center; gap: 0.55rem; color: var(--navy); font-size: 0.82rem; font-weight: 700; }
-.input-method-label span { width: 24px; height: 24px; display: grid; place-items: center; background: var(--navy); color: #fff; font-family: var(--font-mono); font-size: 0.68rem; }
 .file-drop { min-height: 175px; padding: 1.2rem; display: flex; flex-direction: column; align-items: center; justify-content: center; position: relative; overflow: hidden; background: #fff; border: 1px dashed #9aaab3; cursor: pointer; text-align: center; transition: background 150ms ease, border 150ms ease, box-shadow 150ms ease; }
 .file-drop:hover, .file-drop:focus-within { background: var(--blue-soft); border-color: var(--blue); }
 .file-drop:focus-within { box-shadow: 0 0 0 3px rgba(47, 100, 143, 0.13); }
@@ -204,7 +203,6 @@ code { padding: 0.12rem 0.3rem; background: var(--surface-alt); border: 1px soli
 .file-drop small { margin-top: 0.3rem; color: var(--muted); font-size: 0.72rem; }
 .schema-note { margin-top: 0.65rem; color: var(--muted); font-size: 0.68rem; line-height: 1.5; }
 .schema-note strong { color: var(--ink-soft); }
-.code-input { min-height: 175px; resize: vertical; font-family: var(--font-mono); font-size: 0.75rem; line-height: 1.55; }
 .room-limit-panel { margin-bottom: 1rem; padding: 1rem; background: var(--blue-soft); border: 1px solid #bfd0dc; }
 .room-limit-panel legend { padding: 0 0.35rem; color: var(--navy); font-size: 0.8rem; font-weight: 700; }
 .room-limit-panel > p { margin-bottom: 0.85rem; color: var(--ink-soft); font-size: 0.74rem; }
