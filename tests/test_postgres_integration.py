@@ -57,7 +57,7 @@ class TestPostgresIntegration(unittest.TestCase):
         version = self.db.session.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar_one()
-        self.assertEqual(version, "f5a7b9c1d246")
+        self.assertEqual(version, "f6b8c0d2e357")
         seating_run_columns = {
             column["name"] for column in inspect(self.db.engine).get_columns("seating_runs")
         }
