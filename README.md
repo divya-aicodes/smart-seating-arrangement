@@ -829,6 +829,7 @@ The local default database is SQLite at `instance/smart_seating.db`.
 | `APP_ENV` | `development` | `production` |
 | `FLASK_DEBUG` | `false` | `false` |
 | `PORT` | `5000` | Platform-provided |
+| `LOG_LEVEL` | `INFO` | `INFO`, or another validated standard level |
 | `DATABASE_URL` | SQLite | Psycopg PostgreSQL URL |
 | `SECRET_KEY` | Generated if omitted locally | Explicit secret, minimum 32 characters |
 | `SESSION_COOKIE_SECURE` | `false` | `true` |
@@ -849,7 +850,7 @@ Run the full suite:
 python -m unittest discover -s tests -v
 ```
 
-The current suite contains 42 tests covering:
+The fast suite covers:
 
 - real and synthetic persistence;
 - public routes without login;
@@ -861,6 +862,11 @@ The current suite contains 42 tests covering:
 - API pagination and publication;
 - capacity, accessibility, adjacency, and strict failure behavior; and
 - handshaking, chromatic-polynomial, Product Rule, and inclusion-exclusion logic.
+
+GitHub Actions also runs a dedicated PostgreSQL 16 job. It applies every Alembic
+migration, checks model-to-migration drift with `flask db check`, and verifies the
+expected schema and transaction rollback against PostgreSQL. This integration check is
+kept separate from the fast SQLite suite.
 
 Compile the Python source:
 

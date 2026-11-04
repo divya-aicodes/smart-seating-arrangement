@@ -89,7 +89,7 @@ visitor who can reach it, so use a trusted network or an external authentication
 
 ## Phase 5 operational reports
 
-Authenticated users can open `/reports` to review completed or published seating runs.
+The current public interface can open `/reports` to review completed or published seating runs.
 Each report is generated from persisted exams, students, rooms, seats, registrations, and
 allocations. A pending, failed, or invalid run cannot be exported as an institutional
 report.
@@ -110,3 +110,7 @@ Production mode requires PostgreSQL, a non-placeholder secret of at least 32 cha
 and secure session cookies. The repository includes a non-root Docker image, a
 PostgreSQL Compose stack, and GitHub Actions checks; these are deployment tooling, not
 evidence that a live environment, backups, TLS, or monitoring have been configured.
+
+The CI PostgreSQL job applies the complete migration chain, runs `flask db check`, and
+executes a rollback smoke test. Local unit tests continue to use SQLite for speed; they
+must not be treated as proof that a new migration works on PostgreSQL.

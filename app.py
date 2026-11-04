@@ -10,15 +10,23 @@ import math
 import os
 import secrets
 from collections import Counter
-from datetime import timedelta
 from urllib.parse import urlsplit
 # pyrefly: ignore [missing-import]
-from flask import Flask, render_template, request, redirect, url_for, flash, Response, abort, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, Response, abort, jsonify, g
 from flask_wtf.csrf import CSRFError
 from sqlalchemy import select
 from werkzeug.exceptions import RequestEntityTooLarge
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+from config import (
+    MAX_STUDENTS,
+    MAX_UPLOAD_BYTES,
+    _env_flag,
+    _parse_allowed_hosts,
+    _parse_cors_origins,
+    configure_logging,
+    load_app_config,
+)
 from extensions import csrf, db, migrate
 
 from seating.feasibility_check import build_seat_adjacency_graph, check_feasibility
@@ -34,136 +42,12 @@ from seating.validator import validate_seating_arrangement
 from seating.counting import compute_combinatorial_counts
 
 app = Flask(__name__)
+app.config.update(load_app_config())
+configure_logging(app)
+is_production = bool(app.config["IS_PRODUCTION"])
+database_url = str(app.config["SQLALCHEMY_DATABASE_URI"])
 
-MAX_UPLOAD_BYTES = 2 * 1024 * 1024
-MAX_STUDENTS = 5_000
-
-
-def _env_flag(name, default=False):
-    value = os.environ.get(name)
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _parse_cors_origins(raw_value):
-    """Parse exact HTTP(S) origins and reject wildcard or path-based entries."""
-    origins = set()
-    for raw_origin in raw_value.split(","):
-        origin = raw_origin.strip().rstrip("/")
-        if not origin:
-            continue
-        parsed = urlsplit(origin)
-        if (
-            "*" in origin
-            or parsed.scheme not in {"http", "https"}
-            or not parsed.netloc
-            or parsed.path not in {"", "/"}
-            or parsed.query
-            or parsed.fragment
-            or parsed.username
-            or parsed.password
-        ):
-            raise RuntimeError(
-                "CORS_ALLOWED_ORIGINS must contain exact HTTP(S) origins without "
-                "wildcards, credentials, paths, queries, or fragments."
-            )
-        origins.add(origin)
-    return origins
-
-
-def _parse_allowed_hosts(raw_value):
-    """Parse hostnames used to defend production Host-header handling."""
-    hosts = set()
-    for raw_host in raw_value.split(","):
-        host = raw_host.strip().casefold()
-        if not host:
-            continue
-        if (
-            "*" in host
-            or "://" in host
-            or "/" in host
-            or "?" in host
-            or "#" in host
-            or any(char.isspace() for char in host)
-        ):
-            raise RuntimeError(
-                "ALLOWED_HOSTS must contain exact hostnames without schemes, ports, "
-                "wildcards, paths, queries, or fragments."
-            )
-        hosts.add(host)
-    return hosts
-
-
-is_production = os.environ.get("APP_ENV", "development").strip().lower() == "production"
-configured_secret = os.environ.get("SECRET_KEY")
-if is_production and (
-    not configured_secret
-    or configured_secret == "[REDACTED_SECRET]"
-    or len(configured_secret) < 32
-):
-    raise RuntimeError(
-        "SECRET_KEY must be a non-placeholder value of at least 32 characters in production."
-    )
-
-session_cookie_secure = _env_flag("SESSION_COOKIE_SECURE", is_production)
-session_cookie_samesite = os.environ.get("SESSION_COOKIE_SAMESITE", "Lax").strip().title()
-if session_cookie_samesite not in {"Lax", "Strict", "None"}:
-    raise RuntimeError("SESSION_COOKIE_SAMESITE must be Lax, Strict, or None.")
-if is_production and not session_cookie_secure:
-    raise RuntimeError("SESSION_COOKIE_SECURE cannot be disabled in production.")
-
-cors_origins = _parse_cors_origins(os.environ.get("CORS_ALLOWED_ORIGINS", ""))
-cors_allow_credentials = _env_flag("CORS_ALLOW_CREDENTIALS", False)
-if cors_allow_credentials and (
-    not session_cookie_secure or session_cookie_samesite != "None"
-):
-    raise RuntimeError(
-        "Cross-origin credentialed sessions require SESSION_COOKIE_SECURE=true and "
-        "SESSION_COOKIE_SAMESITE=None."
-    )
-allowed_hosts = _parse_allowed_hosts(os.environ.get("ALLOWED_HOSTS", ""))
-if is_production and not allowed_hosts:
-    raise RuntimeError("ALLOWED_HOSTS must contain at least one public hostname in production.")
-
-app.config.update(
-    SECRET_KEY=configured_secret or secrets.token_urlsafe(32),
-    MAX_CONTENT_LENGTH=MAX_UPLOAD_BYTES,
-    SESSION_COOKIE_NAME="smart_seating_session",
-    SESSION_COOKIE_HTTPONLY=True,
-    SESSION_COOKIE_SAMESITE=session_cookie_samesite,
-    SESSION_COOKIE_SECURE=session_cookie_secure,
-    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
-    WTF_CSRF_ENABLED=True,
-    WTF_CSRF_TIME_LIMIT=7200,
-    WTF_CSRF_SSL_STRICT=is_production,
-    CORS_ALLOWED_ORIGINS=cors_origins,
-    CORS_ALLOW_CREDENTIALS=cors_allow_credentials,
-    ALLOWED_HOSTS=allowed_hosts,
-    PREFERRED_URL_SCHEME="https" if is_production else "http",
-)
-
-configured_database_url = os.environ.get("DATABASE_URL")
-if is_production and not configured_database_url:
-    raise RuntimeError("DATABASE_URL must be configured when APP_ENV=production.")
-database_url = (configured_database_url or "sqlite:///smart_seating.db").strip()
-if database_url.startswith("postgres://"):
-    database_url = database_url.replace("postgres://", "postgresql+psycopg://", 1)
-elif database_url.startswith("postgresql://"):
-    database_url = database_url.replace("postgresql://", "postgresql+psycopg://", 1)
-if is_production and not database_url.startswith("postgresql+psycopg://"):
-    raise RuntimeError("Production deployments must use PostgreSQL through Psycopg 3.")
-
-engine_options = {"pool_pre_ping": True}
-if database_url.startswith("postgresql+psycopg://"):
-    engine_options.update({"pool_recycle": 300, "pool_size": 5, "max_overflow": 10})
-
-app.config.update(
-    SQLALCHEMY_DATABASE_URI=database_url,
-    SQLALCHEMY_TRACK_MODIFICATIONS=False,
-    SQLALCHEMY_ENGINE_OPTIONS=engine_options,
-)
-if _env_flag("TRUST_PROXY_HEADERS", False):
+if app.config["TRUST_PROXY_HEADERS"]:
     # Enable only when all traffic arrives through a trusted reverse proxy.
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 # SQLite stores its file in Flask's instance directory. Vercel production uses
@@ -191,6 +75,19 @@ app.register_blueprint(api_bp)
 def _allowed_request_origins():
     """Return exact origins allowed to make browser requests to this deployment."""
     return set(app.config.get("CORS_ALLOWED_ORIGINS", set())) | {request.host_url.rstrip("/")}
+
+
+@app.before_request
+def assign_request_id():
+    """Attach a bounded correlation identifier to logs and the response."""
+    supplied = request.headers.get("X-Request-ID", "").strip()
+    if (
+        8 <= len(supplied) <= 64
+        and all(character.isalnum() or character in {"-", "_", "."} for character in supplied)
+    ):
+        g.request_id = supplied
+    else:
+        g.request_id = secrets.token_hex(16)
 
 
 @app.before_request
@@ -236,6 +133,7 @@ def apply_security_headers(response):
         "Permissions-Policy", "camera=(), geolocation=(), microphone=(), payment=()"
     )
     response.headers.setdefault("Cache-Control", "no-store")
+    response.headers.setdefault("X-Request-ID", getattr(g, "request_id", ""))
     if is_production:
         response.headers.setdefault(
             "Strict-Transport-Security", "max-age=31536000; includeSubDomains"

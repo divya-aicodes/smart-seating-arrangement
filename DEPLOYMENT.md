@@ -84,7 +84,9 @@ Alembic downgrade; never delete or recreate the production database to roll back
 
 ## Monitoring and backups
 
-Collect Gunicorn logs centrally and alert on repeated 5xx responses, failed health
+Application logs are emitted as one JSON object per line and include a bounded
+`request_id` when a Flask request is active. Collect Gunicorn and application logs
+centrally and alert on repeated 5xx responses, failed health
 checks, database saturation, and rejected cross-origin writes. Back up PostgreSQL
 on a schedule appropriate to institutional recovery requirements. The project does not
 claim that backups, TLS, monitoring, or cloud deployment exist until they are configured
