@@ -64,8 +64,10 @@
         <div><span>Students</span><strong>{{ students_count }}</strong></div>
         <div><span>Rooms</span><strong>{{ rooms_count }}</strong></div>
         <div><span>Invigilator ratio</span><strong>1 : {{ invigilator_ratio }}</strong></div>
+        <div><span>Solver outcome</span><strong>{{ solver_status }}</strong></div>
         <div><span>Validation</span><strong class="text-success">Passed</strong></div>
     </div>
+    <p class="result-solver-note"><code>{{ solver_version }}</code> · CP-SAT attempt: {{ cp_sat_attempt_status }}</p>
 </section>
 
 <nav class="section-nav page-shell no-print reveal" aria-label="Result sections">

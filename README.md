@@ -52,8 +52,8 @@ exportable for operational use.
 
 SeatPlan converts each room into a graph, rejects provably infeasible inputs
 before allocation, places accessibility-constrained students first, applies a
-strict class-safe greedy mapper, and validates every occupied adjacency edge
-before a result is accepted.
+strict class-safe greedy mapper, optionally improves bounded runs with CP-SAT,
+and validates every occupied adjacency edge before a result is accepted.
 
 ## Objectives and scope
 
@@ -74,18 +74,19 @@ The application is designed to:
 
 ### Optimization boundary
 
-SeatPlan does **not** claim to calculate a globally optimal arrangement. The
-current allocator is a deterministic greedy heuristic with strict hard
-constraint rejection and a complete post-allocation validation pass.
+SeatPlan does **not** claim every arrangement is globally optimal. It first
+builds a deterministic feasible candidate. Runs within explicit student, seat,
+and variable bounds are then modeled with OR-Tools CP-SAT under a time limit.
+Only `OPTIMAL` means the bounded model proved its objective optimum; larger or
+timed-out runs retain truthful feasible, time-limit, or unknown outcomes.
 
 - Graph theory is the correct model because the problem is defined by pairwise
   seat adjacency and student conflicts.
 - K-means clustering is not used. K-means minimizes distance to numerical
   centroids and does not naturally enforce adjacency, accessibility, uniqueness,
   or room-capacity constraints.
-- If globally optimal solutions or formal proofs of unsatisfiability are needed
-  at larger scales, the mapper can be replaced by a CP-SAT, integer-programming,
-  or SAT solver while retaining the existing data and validation layers.
+- CP-SAT is deliberately bounded; the application does not create one enormous
+  student-by-seat model for institution-scale data.
 
 ## Application features
 
@@ -137,7 +138,7 @@ constraint rejection and a complete post-allocation validation pass.
           |
 8. Place accessibility-constrained students
           |
-9. Build the student conflict graph and map remaining students
+9. Calculate compact conflict statistics and map remaining students
           |
 10. Validate every hard and soft predicate
           |
@@ -303,8 +304,10 @@ $$
 (u,v)\in E_c\iff \operatorname{class}(u)=\operatorname{class}(v)
 $$
 
-Each class induces a clique. This graph is used for diagnostics and coloring;
-final seat placement is separately enforced against $G_s$.
+Each class induces a clique. The production workflow stores class groups rather
+than all clique edges. For a class of size $k$, it calculates $\binom{k}{2}$
+edges and degree $k-1$ directly. Final seat placement is separately enforced
+against $G_s$.
 
 ### 7. Handshaking Lemma
 
@@ -327,9 +330,9 @@ c:V_c\rightarrow\{1,\ldots,k\},\qquad
 (u,v)\in E_c\Rightarrow c(u)\ne c(v)
 $$
 
-The application uses NetworkX `greedy_color` with `largest_first`. Because each
-class is a clique, its students receive different colors. This is an explanatory
-partition, not a claim of globally optimal seat placement.
+Because the conflict graph is a disjoint union of class cliques, the exact
+chromatic number is the largest class size. SeatPlan assigns each member index
+as its color, producing the exact explanatory partition in linear space.
 
 ### 9. Chromatic polynomial
 
@@ -472,8 +475,8 @@ separately.
 | --- | --- | --- |
 | 1. Feasibility | Capacity, accessible-seat count, independence bound, and local-risk analysis | Returns HTTP 422 without generating a plan when a hard failure is guaranteed |
 | 2. Forbidden positions | Backtracking over accessible seats | Stops if accessibility and class non-adjacency cannot both be satisfied |
-| 3. Graph analysis | Student conflict graph, handshaking report, greedy coloring, and worked chromatic polynomial | Produces explanatory mathematics |
-| 4. Seat mapping | Class-interleaved greedy placement with subject-conflict scoring | Leaves an impossible student unassigned rather than violating a hard constraint |
+| 3. Graph analysis | Compact class groups, exact handshaking report, exact clique coloring, and worked chromatic polynomial | Produces the same mathematics without quadratic edge materialization |
+| 4. Seat mapping | Indexed class-safe greedy candidate followed by bounded CP-SAT | Optimizes same-subject adjacency when bounded; otherwise retains a validated feasible candidate |
 | 5. Validation | Full edge scan and logical certificate | Rejects any class, accessibility, or uniqueness failure |
 | 6. Counting | Product Rule, first- and second-order inclusion-exclusion, and Bonferroni bounds | Produces theoretical search-space and violation bounds |
 | 7. Persistence | Transactional run and allocation creation for database mode | Stores only validated database-backed allocations |
@@ -481,9 +484,14 @@ separately.
 ### Complexity notes
 
 - Building the seat graph is $O(|V_s|+|E_s|)$.
-- The conflict-graph constructor compares student pairs and is $O(n^2)$.
-- Greedy mapping is polynomial but repeatedly evaluates available seats and
-  their occupied neighbors; practical cost depends on $n$, $|V_s|$, and degree.
+- Conflict summaries, clique edge counts, degrees, and coloring use $O(n)$
+  time and space, excluding the bounded top-degree report sort.
+- Greedy mapping keeps available-seat sets and incrementally updated neighboring
+  class/subject indexes; candidate selection still depends on the remaining
+  seat count.
+- CP-SAT creates student-seat variables only below configured bounds (140
+  students, 220 seats, and 25,000 assignment variables) and has a five-second
+  wall-time limit.
 - Accessibility backtracking is exponential in the worst case.
 - Exact chromatic-polynomial computation is exponential, which is why the web
   workflow uses it only for the fixed four-vertex example.
@@ -809,6 +817,7 @@ seating/
   feasibility_check.py        Capacity, independence, and risk analysis
   forbidden_positions.py     Accessible-seat backtracking
   graph_coloring.py           Conflict graph and coloring mathematics
+  cp_sat_optimizer.py         Bounded CP-SAT model and outcome mapping
   seat_mapper.py              Strict greedy seat placement
   validator.py                Formal edge and mapping validation
   counting.py                 Product Rule and inclusion-exclusion
@@ -955,9 +964,10 @@ Additional documentation:
 
 ## Current limitations
 
-- The greedy mapper does not guarantee globally minimum subject relaxations.
-- A class count below the independence bound does not prove the greedy mapper
-  will find a placement.
+- Runs above the CP-SAT bounds use the validated greedy result and do not claim
+  objective optimality.
+- A class count below the independence bound does not prove that a feasible
+  placement exists or that the greedy mapper will find one.
 - Accessibility backtracking can become expensive on adversarial large inputs.
 - The full production graph's chromatic polynomial is not calculated.
 - Manual runs are not persisted as reportable seating runs.

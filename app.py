@@ -32,10 +32,16 @@ from extensions import csrf, db, migrate
 from seating.feasibility_check import build_seat_adjacency_graph, check_feasibility
 from seating.forbidden_positions import assign_special_needs_students
 from seating.graph_coloring import (
-    build_student_conflict_graph,
+    build_student_conflict_summary,
     verify_handshaking_lemma,
     color_conflict_graph,
     get_small_worked_chromatic_polynomial
+)
+from seating.cp_sat_optimizer import (
+    FEASIBLE,
+    FEASIBLE_WITH_RELAXATION,
+    OPTIMAL,
+    optimize_with_cp_sat,
 )
 from seating.seat_mapper import map_students_to_seats
 from seating.validator import validate_seating_arrangement
@@ -830,10 +836,10 @@ def assign():
                 feasibility_report,
             )
             
-        # --- Step 3: Conflict Graph Construction & Coloring (NetworkX) ---
-        G_conflict = build_student_conflict_graph(students)
-        handshaking_report = verify_handshaking_lemma(G_conflict)
-        student_coloring, chromatic_number, color_partitions = color_conflict_graph(G_conflict)
+        # --- Step 3: Exact conflict mathematics without materializing class cliques ---
+        conflict_summary = build_student_conflict_summary(students)
+        handshaking_report = verify_handshaking_lemma(conflict_summary)
+        student_coloring, chromatic_number, color_partitions = color_conflict_graph(conflict_summary)
         chromatic_worked_example = get_small_worked_chromatic_polynomial()
         
         # --- Step 4: Seat Mapping with Soft Subject Constraint ---
@@ -844,12 +850,30 @@ def assign():
             diagonal=diagonal
         )
 
+        cp_sat_result = optimize_with_cp_sat(
+            students,
+            G_seats,
+            fixed_assignments=special_assignments,
+            initial_assignments=seat_assignments if not unassigned_students else {},
+        )
+        solver_status = FEASIBLE
+        solver_version = "greedy-v2-indexed"
+        if cp_sat_result.seat_assignments:
+            seat_assignments = cp_sat_result.seat_assignments
+            student_to_seat = {
+                student["id"]: seat_id for seat_id, student in seat_assignments.items()
+            }
+            unassigned_students = []
+            solver_status = cp_sat_result.status
+            solver_version = "cp-sat-v1-bounded"
+
         if unassigned_students:
             unassigned_ids = [student["id"] for student in unassigned_students]
             return render_assignment_error(
                 "Hard-Constraint Assignment Failed",
                 "No invalid fallback was produced. The current solver could not place every student "
-                "without breaking a hard class-adjacency or capacity constraint.",
+                "without breaking a hard class-adjacency or capacity constraint. "
+                f"Bounded CP-SAT outcome: {cp_sat_result.status}.",
                 422,
                 feasibility_report,
                 [f"Unassigned student: {student_id}" for student_id in unassigned_ids[:25]],
@@ -871,11 +895,15 @@ def assign():
                 feasibility_report,
                 [f"{item['id']}: {item['violation_count']} violation(s)" for item in failed],
             )
+
+        subject_violations = validation_certificate["propositions"][1]["violations"]
+        if solver_status != OPTIMAL:
+            solver_status = FEASIBLE_WITH_RELAXATION if subject_violations else FEASIBLE
         
         # Extract relaxed_constraints from validation_certificate for the UI
         # Map them to the format expected by results.html
         relaxed_constraints = []
-        for v in validation_certificate["propositions"][1]["violations"]:
+        for v in subject_violations:
             relaxed_constraints.append({
                 "seat_a": v["seat_u"],
                 "seat_b": v["seat_v"],
@@ -891,25 +919,42 @@ def assign():
 
         seating_run_id = None
         if persisted_session is not None:
+            solver_metadata = {
+                "adjacency_rule": adjacency_rule,
+                "room_ids": [room["room_id"] for room in room_configs],
+                "invigilator_ratio": students_per_invigilator,
+                "solver_status": solver_status,
+                "cp_sat_attempt_status": cp_sat_result.status,
+                "cp_sat_used": cp_sat_result.used_cp_sat,
+                "cp_sat_objective": cp_sat_result.objective_value,
+                "cp_sat_best_bound": cp_sat_result.best_objective_bound,
+                "cp_sat_wall_time_seconds": round(cp_sat_result.wall_time_seconds, 6),
+            }
             run = create_seating_run(
                 persisted_session.id,
-                {
-                    "adjacency_rule": adjacency_rule,
-                    "room_ids": [room["room_id"] for room in room_configs],
-                    "invigilator_ratio": students_per_invigilator,
-                },
-                solver_version="greedy-v1-strict",
+                solver_metadata,
+                solver_version=solver_version,
                 created_by="local-user",
             )
+            relaxed_student_ids = {
+                violation[student_key]
+                for violation in subject_violations
+                for student_key in ("student_u", "student_v")
+            }
             persisted_allocations = []
             for graph_seat_id, student in seat_assignments.items():
                 persisted_allocations.append({
                     "student_id": database_student_ids[student["id"]],
                     "seat_id": database_seat_ids[graph_seat_id],
                     "hard_conflict": False,
-                    "subject_relaxed": bool(student.get("has_subject_relaxation", False)),
+                    "subject_relaxed": student["id"] in relaxed_student_ids,
                 })
-            complete_seating_run(run.id, persisted_allocations, validation_certificate)
+            complete_seating_run(
+                run.id,
+                persisted_allocations,
+                validation_certificate,
+                solver_status=solver_status,
+            )
             seating_run_id = run.id
             record_audit(
                 "seating_run_completed",
@@ -1045,6 +1090,9 @@ def assign():
             invigilator_ratio=students_per_invigilator,
             data_mode=data_mode,
             seating_run_id=seating_run_id,
+            solver_status=solver_status,
+            solver_version=solver_version,
+            cp_sat_attempt_status=cp_sat_result.status,
         )
         
     except RequestEntityTooLarge:

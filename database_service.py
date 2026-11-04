@@ -52,6 +52,8 @@ def complete_seating_run(
     run_id: int,
     allocations: list[dict[str, Any]],
     validation_result: dict[str, Any],
+    *,
+    solver_status: str = "FEASIBLE",
 ) -> SeatingRun:
     """Atomically save a validated run and its student-to-seat allocations."""
     run = db.session.get(SeatingRun, run_id)
@@ -63,6 +65,8 @@ def complete_seating_run(
         raise PersistenceError("A seating run with failed hard constraints cannot be completed.")
     if not allocations:
         raise PersistenceError("A completed seating run must contain at least one allocation.")
+    if solver_status not in {"OPTIMAL", "FEASIBLE", "FEASIBLE_WITH_RELAXATION"}:
+        raise PersistenceError(f"'{solver_status}' is not a publishable solver outcome.")
 
     try:
         seen_students: set[int] = set()
@@ -111,6 +115,7 @@ def complete_seating_run(
             )
 
         run.validation_result = validation_result
+        run.solver_status = solver_status
         run.status = "completed"
         run.generated_at = datetime.now(timezone.utc)
         db.session.commit()

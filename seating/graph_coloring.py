@@ -17,8 +17,42 @@ Discrete Mathematics Core:
     P(G, lambda) = P(G - e, lambda) - P(G / e, lambda)
 """
 
+from dataclasses import dataclass
+from typing import Any
+
 import networkx as nx
 import sympy as sp
+
+
+@dataclass(frozen=True)
+class StudentConflictSummary:
+    """Exact same-class conflict statistics without materializing clique edges."""
+
+    students: tuple[dict[str, Any], ...]
+    students_by_class: dict[str, tuple[dict[str, Any], ...]]
+    num_edges: int
+
+    @property
+    def num_vertices(self):
+        return len(self.students)
+
+
+def build_student_conflict_summary(students):
+    """Build the O(n)-space representation used by production allocations."""
+    grouped = {}
+    normalized = []
+    seen_ids = set()
+    for student in students:
+        student_id = student["id"]
+        if student_id in seen_ids:
+            raise ValueError(f"Duplicate student ID in conflict input: {student_id}")
+        seen_ids.add(student_id)
+        normalized.append(student)
+        grouped.setdefault(student.get("class", "DefaultClass"), []).append(student)
+
+    frozen_groups = {name: tuple(members) for name, members in grouped.items()}
+    edge_count = sum(len(members) * (len(members) - 1) // 2 for members in frozen_groups.values())
+    return StudentConflictSummary(tuple(normalized), frozen_groups, edge_count)
 
 
 def build_student_conflict_graph(students):
@@ -37,14 +71,14 @@ def build_student_conflict_graph(students):
             special_needs=s.get("special_needs", False)
         )
     
-    # Add edges between students in the same class
-    student_list = list(G.nodes(data=True))
-    for i in range(len(student_list)):
-        for j in range(i + 1, len(student_list)):
-            u_id, u_data = student_list[i]
-            v_id, v_data = student_list[j]
-            if u_data["cls"] == v_data["cls"]:
-                G.add_edge(u_id, v_id)
+    # Retained for small teaching examples. The application allocation path uses
+    # build_student_conflict_summary and never constructs these clique edges.
+    grouped = {}
+    for student_id, data in G.nodes(data=True):
+        grouped.setdefault(data["cls"], []).append(student_id)
+    for members in grouped.values():
+        for index, student_id in enumerate(members):
+            G.add_edges_from((student_id, other_id) for other_id in members[index + 1:])
                 
     return G
 
@@ -54,10 +88,22 @@ def verify_handshaking_lemma(G):
     Verifies the Handshaking Lemma: sum_{v in V} deg(v) = 2 * |E|.
     Returns full degree list, sum of degrees, edge count, and boolean verification.
     """
-    degree_dict = dict(G.degree())
+    if isinstance(G, StudentConflictSummary):
+        degree_dict = {
+            student["id"]: len(G.students_by_class[student.get("class", "DefaultClass")]) - 1
+            for student in G.students
+        }
+        num_edges = G.num_edges
+        num_vertices = G.num_vertices
+        class_by_student = {
+            student["id"]: student.get("class", "DefaultClass") for student in G.students
+        }
+    else:
+        degree_dict = dict(G.degree())
+        num_edges = G.number_of_edges()
+        num_vertices = G.number_of_nodes()
+        class_by_student = {student_id: G.nodes[student_id].get("cls", "N/A") for student_id in G.nodes}
     sum_degrees = sum(degree_dict.values())
-    num_edges = G.number_of_edges()
-    num_vertices = G.number_of_nodes()
     
     handshaking_holds = (sum_degrees == 2 * num_edges)
     
@@ -66,7 +112,7 @@ def verify_handshaking_lemma(G):
     
     # Degrees distribution / top degrees
     degree_list = [
-        {"student_id": v, "degree": d, "class": G.nodes[v].get("cls", "N/A")}
+        {"student_id": v, "degree": d, "class": class_by_student[v]}
         for v, d in sorted(degree_dict.items(), key=lambda x: x[1], reverse=True)
     ]
     
@@ -85,9 +131,20 @@ def verify_handshaking_lemma(G):
 
 def color_conflict_graph(G_conflict):
     """
-    Partitions the student conflict graph into color classes using NetworkX greedy_color.
-    Students with the same color belong to different classes (independent set in G_conflict).
+    Color a compact class-clique summary exactly, or retain NetworkX greedy
+    coloring compatibility for explicit small graph examples.
     """
+    if isinstance(G_conflict, StudentConflictSummary):
+        coloring = {}
+        color_classes = {}
+        # A disjoint union of class cliques has exact chromatic number equal to
+        # the largest class. The member index is therefore an exact coloring.
+        for members in G_conflict.students_by_class.values():
+            for color_id, student in enumerate(members):
+                coloring[student["id"]] = color_id
+                color_classes.setdefault(color_id, []).append(student["id"])
+        return coloring, max((len(group) for group in G_conflict.students_by_class.values()), default=0), color_classes
+
     if len(G_conflict) == 0:
         return {}, 0, {}
     

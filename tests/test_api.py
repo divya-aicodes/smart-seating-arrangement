@@ -147,6 +147,7 @@ class TestRestApi(unittest.TestCase):
             exam_id=exam.id,
             exam_session_id=exam.exam_session_id,
             solver_version="api-test-v1",
+            solver_status="FEASIBLE",
             solver_config={"adjacency_rule": "orthogonal"},
             validation_result={"overall_valid": True, "propositions": []},
             status="completed",
@@ -172,6 +173,7 @@ class TestRestApi(unittest.TestCase):
         )
         self.assertEqual(published.status_code, 200, published.get_data(as_text=True))
         self.assertEqual(published.get_json()["data"]["status"], "published")
+        self.assertEqual(published.get_json()["data"]["solver_status"], "FEASIBLE")
         self.assertEqual(
             AuditLog.query.filter_by(action="seating_run_published_api").count(), 1
         )

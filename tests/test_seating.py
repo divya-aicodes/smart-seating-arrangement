@@ -14,11 +14,22 @@ from seating.feasibility_check import (
 )
 from seating.forbidden_positions import assign_special_needs_students
 from seating.graph_coloring import (
+    build_student_conflict_summary,
     build_student_conflict_graph,
     verify_handshaking_lemma,
     color_conflict_graph,
     compute_chromatic_polynomial_symbolic,
     get_small_worked_chromatic_polynomial
+)
+from seating.cp_sat_optimizer import (
+    INFEASIBLE,
+    MAX_CP_SAT_STUDENTS,
+    OPTIMAL,
+    SKIPPED_BOUND,
+    TIME_LIMIT_REACHED,
+    UNKNOWN,
+    classify_unsolved_status,
+    optimize_with_cp_sat,
 )
 from seating.seat_mapper import map_students_to_seats
 from seating.validator import validate_seating_arrangement
@@ -130,6 +141,24 @@ class TestDiscreteMathSeatingEngine(unittest.TestCase):
         self.assertEqual(worked_example["evaluations"][2], 2)  # 2 colors on bipartite C_4 has 2 colorings
         self.assertEqual(worked_example["evaluations"][3], 18) # P(C_4, 3) = 18
 
+    def test_compact_conflict_summary_is_exact_without_pair_edges(self):
+        students = [
+            {"id": f"S{i}", "class": "A" if i < 3000 else "B", "subject": "Math"}
+            for i in range(5000)
+        ]
+        summary = build_student_conflict_summary(students)
+        expected_edges = (3000 * 2999 // 2) + (2000 * 1999 // 2)
+        report = verify_handshaking_lemma(summary)
+        coloring, color_count, partitions = color_conflict_graph(summary)
+
+        self.assertEqual(summary.num_vertices, 5000)
+        self.assertEqual(summary.num_edges, expected_edges)
+        self.assertEqual(report["sum_degrees"], 2 * expected_edges)
+        self.assertTrue(report["handshaking_holds"])
+        self.assertEqual(color_count, 3000)
+        self.assertEqual(len(coloring), 5000)
+        self.assertEqual(len(partitions[0]), 2)
+
     def test_step4_and_step5_seat_mapping_and_validation(self):
         """Step 4 & 5: Test seat mapping and explicit propositional logic validator."""
         G_seats = build_seat_adjacency_graph(self.room_configs)
@@ -173,6 +202,50 @@ class TestDiscreteMathSeatingEngine(unittest.TestCase):
         seat_assign, _, _, unassigned = map_students_to_seats(students, G_seats)
         self.assertEqual(len(seat_assign), 1)
         self.assertEqual([student["id"] for student in unassigned], ["S2"])
+
+    def test_bounded_cp_sat_returns_independently_validated_optimum(self):
+        graph = build_seat_adjacency_graph(self.room_configs)
+        result = optimize_with_cp_sat(self.students_balanced, graph, time_limit_seconds=3)
+
+        self.assertEqual(result.status, OPTIMAL)
+        self.assertTrue(result.used_cp_sat)
+        self.assertEqual(len(result.seat_assignments), len(self.students_balanced))
+        certificate = validate_seating_arrangement(
+            result.seat_assignments, graph, self.students_balanced
+        )
+        self.assertTrue(certificate["overall_valid"])
+
+    def test_cp_sat_refuses_models_above_configured_bound(self):
+        students = [
+            {"id": f"S{i}", "class": f"C{i % 2}", "subject": "Math"}
+            for i in range(MAX_CP_SAT_STUDENTS + 1)
+        ]
+        graph = build_seat_adjacency_graph(self.room_configs)
+        result = optimize_with_cp_sat(students, graph)
+
+        self.assertEqual(result.status, SKIPPED_BOUND)
+        self.assertFalse(result.used_cp_sat)
+        self.assertEqual(result.seat_assignments, {})
+
+    def test_cp_sat_timeout_and_unknown_are_not_infeasibility_proofs(self):
+        self.assertEqual(
+            classify_unsolved_status(
+                proved_infeasible=False, wall_time_seconds=4.99, time_limit_seconds=5
+            ),
+            TIME_LIMIT_REACHED,
+        )
+        self.assertEqual(
+            classify_unsolved_status(
+                proved_infeasible=False, wall_time_seconds=0.01, time_limit_seconds=5
+            ),
+            UNKNOWN,
+        )
+        self.assertEqual(
+            classify_unsolved_status(
+                proved_infeasible=True, wall_time_seconds=0.01, time_limit_seconds=5
+            ),
+            INFEASIBLE,
+        )
 
     def test_diagonal_independence_bound_is_exact_for_king_grid(self):
         students = [

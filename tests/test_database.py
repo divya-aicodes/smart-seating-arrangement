@@ -277,7 +277,18 @@ class TestDatabasePersistence(unittest.TestCase):
             {"overall_valid": True, "propositions": []},
         )
         self.assertEqual(completed.status, "completed")
+        self.assertEqual(completed.solver_status, "FEASIBLE")
         self.assertEqual(SeatAllocation.query.filter_by(seating_run_id=run.id).count(), 1)
+
+        with self.assertRaises(PersistenceError):
+            complete_seating_run(
+                create_seating_run(
+                    self.exam_session.id, {"adjacency_rule": "orthogonal"}
+                ).id,
+                [{"student_id": self.student.id, "seat_id": self.seat.id}],
+                {"overall_valid": True},
+                solver_status="TIME_LIMIT_REACHED",
+            )
 
         published = publish_seating_run(run.id)
         self.assertEqual(published.status, "published")

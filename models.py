@@ -548,6 +548,11 @@ class SeatingRun(TimestampMixin, db.Model):
             "status IN ('pending', 'running', 'completed', 'failed', 'published')",
             name="ck_seating_runs_status",
         ),
+        CheckConstraint(
+            "solver_status IN ('OPTIMAL', 'FEASIBLE', 'FEASIBLE_WITH_RELAXATION', "
+            "'INFEASIBLE', 'TIME_LIMIT_REACHED', 'UNKNOWN')",
+            name="ck_seating_runs_solver_status",
+        ),
         Index("ix_seating_runs_exam_status", "exam_id", "status"),
         Index("ix_seating_runs_session_status", "exam_session_id", "status"),
     )
@@ -560,6 +565,7 @@ class SeatingRun(TimestampMixin, db.Model):
         ForeignKey("exam_sessions.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     solver_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    solver_status: Mapped[str] = mapped_column(String(40), nullable=False, default="UNKNOWN")
     solver_config: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     validation_result: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")

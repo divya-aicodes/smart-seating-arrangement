@@ -194,6 +194,7 @@ def _run_json(run: SeatingRun, *, allocation_count: int | None = None) -> dict[s
         "exam_session_id": run.exam_session_id,
         "status": run.status,
         "solver_version": run.solver_version,
+        "solver_status": run.solver_status,
         "solver_config": run.solver_config,
         "validation_result": run.validation_result,
         "generated_at": _iso(run.generated_at),

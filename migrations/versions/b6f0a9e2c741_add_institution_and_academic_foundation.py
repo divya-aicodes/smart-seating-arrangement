@@ -19,7 +19,18 @@ branch_labels = None
 depends_on = None
 
 
+def _set_sqlite_foreign_keys(enabled):
+    """Allow Alembic batch table recreation while preserving all table rows."""
+    bind = op.get_bind()
+    if bind.dialect.name != "sqlite":
+        return
+    state = "ON" if enabled else "OFF"
+    with op.get_context().autocommit_block():
+        bind.exec_driver_sql(f"PRAGMA foreign_keys={state}")
+
+
 def upgrade():
+    _set_sqlite_foreign_keys(False)
     op.create_table(
         "institutions",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -218,9 +229,11 @@ def upgrade():
         "student_academic_records",
         ["student_id", "status"],
     )
+    _set_sqlite_foreign_keys(True)
 
 
 def downgrade():
+    _set_sqlite_foreign_keys(False)
     op.drop_index(
         "ix_student_academic_records_student_status",
         table_name="student_academic_records",
@@ -272,3 +285,4 @@ def downgrade():
     op.drop_index("ix_institutions_code", table_name="institutions")
     op.drop_index("ix_institutions_active", table_name="institutions")
     op.drop_table("institutions")
+    _set_sqlite_foreign_keys(True)

@@ -14,6 +14,8 @@ Discrete Mathematics Core:
   When min cost > 0, the constraint is relaxed and explicitly logged.
 """
 
+from collections import Counter, defaultdict
+
 def map_students_to_seats(
     students,
     G_seats,
@@ -37,11 +39,18 @@ def map_students_to_seats(
 
     seat_assignments = {}  # seat_id -> student dict
     student_to_seat = {}   # student_id -> seat_id
+    student_by_id = {student["id"]: student for student in students}
+    if len(student_by_id) != len(students):
+        raise ValueError("Student IDs must be unique before seating allocation.")
     
     # 1. Populate special-needs students already seated
     assigned_special_ids = set()
     for s_id, seat_id in already_assigned_special.items():
-        s_obj = next(s for s in students if s["id"] == s_id)
+        if s_id not in student_by_id:
+            raise ValueError(f"Pre-assigned student {s_id} is not in the allocation input.")
+        if seat_id not in G_seats:
+            raise ValueError(f"Pre-assigned seat {seat_id} is unavailable.")
+        s_obj = student_by_id[s_id]
         student_copy = dict(s_obj)
         student_copy["assigned_seat"] = seat_id
         student_copy["seat_label"] = G_seats.nodes[seat_id].get("seat_label", seat_id)
@@ -52,21 +61,23 @@ def map_students_to_seats(
         
     remaining_students = [s for s in students if s["id"] not in assigned_special_ids]
     
-    # 2. Partition seats by bipartite parity (or 4-coloring if diagonal)
-    available_seats = [n for n in G_seats.nodes() if n not in seat_assignments]
+    # 2. Build incremental availability and neighbor-conflict indexes.
+    seat_order = {seat_id: index for index, seat_id in enumerate(G_seats.nodes())}
+    available_seats = set(G_seats.nodes()) - set(seat_assignments)
+    class_blocked_seats = defaultdict(set)
+    subject_conflicts = defaultdict(Counter)
+
+    def register_occupied_seat(seat_id, student):
+        student_class = student.get("class", "DefaultClass")
+        student_subject = student.get("subject", "General")
+        for neighbor_id in G_seats.neighbors(seat_id):
+            if neighbor_id in available_seats:
+                class_blocked_seats[student_class].add(neighbor_id)
+                subject_conflicts[student_subject][neighbor_id] += 1
+
+    for occupied_seat, occupied_student in seat_assignments.items():
+        register_occupied_seat(occupied_seat, occupied_student)
     
-    # Determine seat parity (row + col_idx) % 2 for bipartite orthogonal grid
-    seat_parities = {}
-    for n in G_seats.nodes():
-        node_data = G_seats.nodes[n]
-        r = node_data.get("row", 1)
-        c = node_data.get("col_idx", 1)
-        if diagonal:
-            parity = ((r % 2) * 2) + (c % 2)
-        else:
-            parity = (r + c) % 2
-        seat_parities[n] = parity
-        
     # Group remaining students by class, sorted by class size descending
     class_groups = {}
     for s in remaining_students:
@@ -103,39 +114,22 @@ def map_students_to_seats(
         best_seat = None
         best_score = float('inf')
         
-        # Candidate available seats
-        available_seats = [n for n in G_seats.nodes() if n not in seat_assignments]
         if not available_seats:
             unassigned_students.append(student)
             continue
-            
-        # Score available seats:
-        # - Hard constraint violation (class conflict with adjacent seat): penalty 1,000,000
-        # - Soft constraint violation (subject conflict with adjacent seat): penalty 10
-        # - Parity balance score: tie breaker
-        for seat_id in available_seats:
-            class_conflict_count = 0
-            subject_conflict_count = 0
-            
-            for neighbor_id in G_seats.neighbors(seat_id):
-                if neighbor_id in seat_assignments:
-                    neighbor_student = seat_assignments[neighbor_id]
-                    if neighbor_student.get("class") == s_class:
-                        class_conflict_count += 1
-                    if neighbor_student.get("subject") == s_subject:
-                        subject_conflict_count += 1
-                        
-            # Same-class adjacency is a hard constraint, never a weighted fallback.
-            if class_conflict_count:
-                continue
 
-            score = subject_conflict_count * 10
-            
-            if score < best_score:
-                best_score = score
+        # The counters are updated only around newly occupied seats, avoiding a
+        # neighbor rescan for every student-seat candidate.
+        blocked = class_blocked_seats[s_class]
+        subject_scores = subject_conflicts[s_subject]
+        for seat_id in available_seats:
+            if seat_id in blocked:
+                continue
+            score = subject_scores.get(seat_id, 0)
+            candidate = (score, seat_order[seat_id])
+            if best_seat is None or candidate < best_score:
+                best_score = candidate
                 best_seat = seat_id
-                if score == 0:
-                    break  # Perfect placement found
                     
         if best_seat:
             student_copy = dict(student)
@@ -147,6 +141,8 @@ def map_students_to_seats(
             
             seat_assignments[best_seat] = student_copy
             student_to_seat[s_id] = best_seat
+            available_seats.remove(best_seat)
+            register_occupied_seat(best_seat, student_copy)
         else:
             unassigned_students.append(student)
             
