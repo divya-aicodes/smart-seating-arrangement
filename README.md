@@ -1000,15 +1000,20 @@ INITIAL_SETUP_TOKEN=<one-time random setup secret>
 RATE_LIMIT_STORAGE_URI=<shared Redis URI for multi-instance limits>
 ```
 
-The Vercel build configuration runs:
+`vercel.json` selects Vercel's Flask preset and explicitly disables the legacy
+dashboard build-command override. Database migrations must not run as part of a
+serverless application build. Apply them once, from a controlled release job
+that can reach the production PostgreSQL database, before directing traffic to
+a schema-dependent release:
 
 ```powershell
 python -m flask --app app db upgrade
 ```
 
-The PostgreSQL database must be reachable during the build. Vercel's local
-filesystem is ephemeral, so SQLite is not suitable for durable production
-records, reports, or audit history.
+The PostgreSQL database does not need to be reachable while Vercel packages the
+Flask function, but it must be reachable at runtime and from the one-off
+migration job. Vercel's local filesystem is ephemeral, so SQLite is not suitable
+for durable production records, reports, or audit history.
 
 Additional documentation:
 
