@@ -1000,9 +1000,9 @@ INITIAL_SETUP_TOKEN=<one-time random setup secret>
 RATE_LIMIT_STORAGE_URI=<shared Redis URI for multi-instance limits>
 ```
 
-`vercel.json` selects Vercel's Flask preset and explicitly disables the legacy
-dashboard build-command override. Database migrations must not run as part of a
-serverless application build. Apply them once, from a controlled release job
+`vercel.json` selects Vercel's Flask preset and supplies an empty build command
+to override the legacy dashboard migration command. Database migrations must not
+run as part of a serverless application build. Apply them once, from a controlled release job
 that can reach the production PostgreSQL database, before directing traffic to
 a schema-dependent release:
 
