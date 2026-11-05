@@ -1016,6 +1016,25 @@ Flask function, but it must be reachable at runtime and from the one-off
 migration job. Vercel's local filesystem is ephemeral, so SQLite is not suitable
 for durable production records, reports, or audit history.
 
+## Render deployment
+
+[`render.yaml`](render.yaml) defines a free Docker web service and a free Render
+PostgreSQL database in the Singapore region. The web service uses the existing
+production Dockerfile, runs Alembic migrations before Gunicorn starts, validates
+`/api/v1/health`, and deploys `main` after its GitHub checks pass.
+
+Create a Render Blueprint from this repository and provide a strong, one-time
+`INITIAL_SETUP_TOKEN` when prompted. Render generates `SECRET_KEY` and injects
+the database connection automatically. After the first deployment, open
+`https://seatplan-exam-seating.onrender.com/setup`, enter the setup token, and
+create the institution administrator. The setup route closes after that account
+is created.
+
+The free web service can sleep after 15 minutes without traffic. Its first
+request after sleeping can therefore be slow. Render's free PostgreSQL database
+is intended for evaluation, has no backups, and expires after 30 days; export or
+migrate institutional records before that deadline.
+
 Additional documentation:
 
 - [`DEPLOYMENT.md`](DEPLOYMENT.md) — deployment and operations

@@ -1,0 +1,60 @@
+services:
+  - type: web
+    name: seatplan-exam-seating
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: main
+    autoDeployTrigger: checksPass
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: seatplan-postgres
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true
+      - key: INITIAL_SETUP_TOKEN
+        sync: false
+      - key: ALLOWED_HOSTS
+        fromService:
+          name: seatplan-exam-seating
+          type: web
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
+      - key: SESSION_COOKIE_SECURE
+        value: "true"
+      - key: SESSION_COOKIE_SAMESITE
+        value: Lax
+      - key: CORS_ALLOWED_ORIGINS
+        value: ""
+      - key: CORS_ALLOW_CREDENTIALS
+        value: "false"
+      - key: TRUST_PROXY_HEADERS
+        value: "true"
+      - key: RUN_MIGRATIONS
+        value: "true"
+      - key: HEALTHCHECK_HOST
+        fromService:
+          name: seatplan-exam-seating
+          type: web
+          envVarKey: RENDER_EXTERNAL_HOSTNAME
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: GUNICORN_THREADS
+        value: "4"
+      - key: GUNICORN_TIMEOUT
+        value: "300"
+      - key: BACKGROUND_JOBS_ENABLED
+        value: "false"
+      - key: RATE_LIMIT_STORAGE_URI
+        value: memory://
+
+databases:
+  - name: seatplan-postgres
+    plan: free
+    region: singapore
+    databaseName: seatplan
+    user: seatplan
+
