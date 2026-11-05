@@ -19,10 +19,7 @@ services:
       - key: INITIAL_SETUP_TOKEN
         sync: false
       - key: ALLOWED_HOSTS
-        fromService:
-          name: seatplan-exam-seating
-          type: web
-          envVarKey: RENDER_EXTERNAL_HOSTNAME
+        value: seatplan-exam-seating.onrender.com
       - key: SESSION_COOKIE_SECURE
         value: "true"
       - key: SESSION_COOKIE_SAMESITE
@@ -36,10 +33,7 @@ services:
       - key: RUN_MIGRATIONS
         value: "true"
       - key: HEALTHCHECK_HOST
-        fromService:
-          name: seatplan-exam-seating
-          type: web
-          envVarKey: RENDER_EXTERNAL_HOSTNAME
+        value: seatplan-exam-seating.onrender.com
       - key: WEB_CONCURRENCY
         value: "1"
       - key: GUNICORN_THREADS
