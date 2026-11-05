@@ -1,5 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "flask",
-  "buildCommand": ""
+  "buildCommand": "python -c \"print('SeatPlan Flask build')\""
 }
