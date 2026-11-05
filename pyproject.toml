@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 dependencies = [
   "Flask>=3.0.0",
   "Flask-Login>=0.6,<1",
+  "Flask-Limiter==3.12",
   "Flask-SQLAlchemy>=3.1,<4",
   "Flask-Migrate>=4.0,<5",
   "Flask-WTF>=1.2,<2",
