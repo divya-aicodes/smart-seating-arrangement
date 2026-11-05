@@ -705,7 +705,7 @@ def layout_recommendations():
             "max_rooms",
             10,
             1,
-            10,
+            200,
             "Maximum rooms available",
         )
         csv_file = request.files.get("csv_file")
@@ -931,7 +931,7 @@ def assign():
                 )
                 return redirect(url_for("jobs.detail", job_id=job.id))
         else:
-            num_rooms = parse_bounded_int("num_rooms", 1, 1, 10, "Number of rooms")
+            num_rooms = parse_bounded_int("num_rooms", 1, 1, 200, "Number of rooms")
             rows = parse_bounded_int("rows", 4, 1, 20, "Rows per room")
             cols = parse_bounded_int("cols", 3, 1, 15, "Benches per row")
             seats_per_bench = parse_bounded_int(

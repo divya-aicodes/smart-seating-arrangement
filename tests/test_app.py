@@ -86,6 +86,9 @@ class TestFlaskIntegration(unittest.TestCase):
         self.assertIn(b"data-layout-recommendations", response.data)
         self.assertIn(b"Maximum seats in one room", response.data)
         self.assertIn(b"Maximum rooms available", response.data)
+        self.assertIn(b'id="max_rooms"', response.data)
+        self.assertIn(b'max="200"', response.data)
+        self.assertIn(b"1\xe2\x80\x93200 rooms", response.data)
         self.assertNotIn(b"Paste CSV text", response.data)
         self.assertNotIn(b"student_data_text", response.data)
 
@@ -888,6 +891,42 @@ class TestFlaskIntegration(unittest.TestCase):
             for item in payload["recommendations"]
         ))
 
+    def test_layout_recommendations_allow_up_to_200_rooms(self):
+        students = "\n".join(
+            f"S{index},Class{index % 4},Mathematics,N"
+            for index in range(1, 81)
+        )
+        response = self.client.post(
+            "/api/layout-recommendations",
+            data={
+                "csv_file": (io.BytesIO(
+                    ("ID,Class,Subject,Special_Needs\n" + students).encode("utf-8")
+                ), "students.csv"),
+                "max_seats_per_room": "24",
+                "max_rooms": "200",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["limits"]["max_rooms"], 200)
+
+    def test_layout_recommendations_reject_more_than_200_rooms(self):
+        response = self.client.post(
+            "/api/layout-recommendations",
+            data={
+                "csv_file": (io.BytesIO(
+                    b"ID,Class,Subject,Special_Needs\nS1,ClassA,Math,N\n"
+                ), "students.csv"),
+                "max_rooms": "201",
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn(
+            "Maximum rooms available must be between 1 and 200",
+            response.get_json()["error"]["message"],
+        )
+
     def test_layout_recommendations_explain_impossible_college_limits(self):
         students = "\n".join(
             f"S{index},Class{index % 4},Mathematics,N"
@@ -969,7 +1008,7 @@ class TestFlaskIntegration(unittest.TestCase):
             "num_rooms": "0",
         })
         self.assertEqual(res.status_code, 400)
-        self.assertIn(b"Number of rooms must be between 1 and 10", res.data)
+        self.assertIn(b"Number of rooms must be between 1 and 200", res.data)
 
     def test_untrusted_write_origin_is_blocked(self):
         res = self.client.post(

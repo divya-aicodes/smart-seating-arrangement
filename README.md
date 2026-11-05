@@ -97,7 +97,7 @@ timed-out runs retain truthful feasible, time-limit, or unknown outcomes.
 - Select a persisted exam and rooms from one versioned dataset.
 - Run an ad hoc plan from an uploaded student CSV file.
 - Choose orthogonal or orthogonal-plus-diagonal adjacency.
-- Configure one to ten manual rooms and their physical layout.
+- Configure between one and 200 manual examination rooms and their physical layout.
 - Mark front-row, aisle, combined, or front-aisle-only accessible positions.
 - Configure the student-to-invigilator ratio.
 - Download a header-only CSV import template.
@@ -564,6 +564,10 @@ The browser route supports 2–1,000 students, 2–50 classes, 1–20 subjects, 
 1–20 rooms. Generation uses `random.Random(seed)`, so accepted parameters are
 reproducible without static frontend fixtures.
 
+This 20-room bound applies only to synthetic dataset generation. The manual
+seating planner and its one-click layout recommendations support up to 200
+physical rooms for an examination.
+
 Real and synthetic records use the same tables, planning workflow, and reports.
 Their `source_type` and dataset lineage remain explicit.
 
@@ -576,7 +580,9 @@ the records and returns up to three one-click layout choices based on capacity,
 largest-class independent-set bounds, accessibility requests, and the selected
 adjacency rule. The user also supplies the college's maximum seats per room and
 maximum available rooms, so the system does not assume that one oversized room
-exists. Each candidate must also complete a dry run through the actual
+exists. Both the recommendation request and the final manual allocation enforce
+a maximum of 200 rooms on the server; the browser fields apply the same bound.
+Each candidate must also complete a dry run through the actual
 accessibility assignment, seat mapper, and hard-constraint validator before it
 is shown. Choosing a card fills room count, rows, benches per row, and seats per
 bench. Manual runs record an audit event but do not create a database
